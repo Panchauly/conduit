@@ -1,0 +1,6 @@
+event: UserCreated
+collection: users
+
+document:
+  _id: payload.id
+  email: payload.email

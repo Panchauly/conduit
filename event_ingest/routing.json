@@ -1,0 +1,13 @@
+{
+    "UserCreated": [
+        "Sql",
+        "Document"
+    ],
+    "OrderPlaced": [
+        "Sql",
+        "Document"
+    ],
+    "CacheInvalidated": [
+        "KeyValue"
+    ]
+}

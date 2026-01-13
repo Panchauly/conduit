@@ -1,0 +1,14 @@
+/home/slt-lap-053/Programs/NucleiDB/event_ingest/target/debug/deps/libserde-bbde42de6a8fe705.rmeta: /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/slt-lap-053/Programs/NucleiDB/event_ingest/target/debug/build/serde-9a51dddb8dff7271/out/private.rs
+
+/home/slt-lap-053/Programs/NucleiDB/event_ingest/target/debug/deps/libserde-bbde42de6a8fe705.rlib: /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/slt-lap-053/Programs/NucleiDB/event_ingest/target/debug/build/serde-9a51dddb8dff7271/out/private.rs
+
+/home/slt-lap-053/Programs/NucleiDB/event_ingest/target/debug/deps/serde-bbde42de6a8fe705.d: /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/slt-lap-053/Programs/NucleiDB/event_ingest/target/debug/build/serde-9a51dddb8dff7271/out/private.rs
+
+/home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/home/slt-lap-053/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/home/slt-lap-053/Programs/NucleiDB/event_ingest/target/debug/build/serde-9a51dddb8dff7271/out/private.rs:
+
+# env-dep:OUT_DIR=/home/slt-lap-053/Programs/NucleiDB/event_ingest/target/debug/build/serde-9a51dddb8dff7271/out

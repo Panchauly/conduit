@@ -1,0 +1,11 @@
+event: OrderPlaced
+table: orders
+primary_key: id
+
+columns:
+  id: payload.id
+  user_id: payload.user_id
+  amount: payload.amount
+
+foreign_keys:
+  user_id: users.id

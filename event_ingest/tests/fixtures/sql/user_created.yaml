@@ -1,0 +1,8 @@
+event: UserCreated
+table: users
+primary_key: id
+
+columns:
+  id: payload.id
+  email: payload.email
+  created_at: payload.created_at

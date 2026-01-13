@@ -1,0 +1,9 @@
+event: OrderPlaced
+collection: orders
+
+document:
+  _id: payload.id
+  amount: payload.amount
+  user:
+    id: payload.user_id
+    email: payload.user_email
