@@ -1,7 +1,11 @@
-use conduit_core::execute_event;
-use conduit_core::event::Event;
-use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::adapter::document::mapping::DocumentMapping;
+use conduit_core::adapter::sql::mapping::SqlMapping;
+use conduit_core::event::Event;
+use conduit_core::execute_event;
+use conduit_core::runtime::config::{
+    AdapterConfig, ConduitConfig, FileAdapterConfig, FileConfig, RoutingConfig,
+    SqliteAdapterConfig, SqliteConfig,
+};
 
 use std::collections::HashMap;
 use std::env;
@@ -21,11 +25,41 @@ fn set_test_routing() {
 // ------------------------------------------------------------
 // Test
 // ------------------------------------------------------------
-
 #[test]
 fn execute_event_runs_without_panic() {
     set_test_routing();
 
+    // -----------------------------
+    // Config (Phase 5 requirement)
+    // -----------------------------
+    let config = ConduitConfig {
+        version: 1,
+        routing: RoutingConfig {
+            file: "routing.json".into(),
+        },
+        adapters: vec![
+            AdapterConfig::Sqlite(SqliteAdapterConfig {
+                id: "sqlite".into(),
+                priority: 10,
+                config: SqliteConfig {
+                    path: ":memory:".into(),
+                },
+            }),
+            AdapterConfig::File(FileAdapterConfig {
+                id: "file".into(),
+                priority: 20,
+                config: FileConfig {
+                    root: "./target/test-docs".into(),
+                },
+            }),
+        ],
+    };
+
+    config.validate().unwrap();
+
+    // -----------------------------
+    // Mappings
+    // -----------------------------
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserCreated".to_string(),
@@ -55,6 +89,9 @@ document:
         .unwrap(),
     );
 
+    // -----------------------------
+    // Event
+    // -----------------------------
     let event = Event {
         event_id: "evt-1".into(),
         event_type: "UserCreated".into(),
@@ -62,7 +99,10 @@ document:
         metadata: Default::default(),
     };
 
-    let results = execute_event(sql_mappings, doc_mappings, event);
+    // -----------------------------
+    // Execute
+    // -----------------------------
+    let results = execute_event(&config, sql_mappings, doc_mappings, event);
 
     assert!(!results.is_empty());
 }

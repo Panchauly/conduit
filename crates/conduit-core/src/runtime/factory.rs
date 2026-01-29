@@ -8,32 +8,49 @@ use crate::adapter::sql::mapping::SqlMapping;
 use crate::adapter::sql::runtime::SqlRuntimeBuilder;
 use crate::adapter::sql::sqlite::SqliteAdapter;
 
-pub fn build_adapters(
+use crate::runtime::config::{AdapterConfig, ConduitConfig};
+
+pub fn build_adapters_from_config(
+    config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
     doc_mappings: HashMap<String, DocumentMapping>,
 ) -> Vec<Box<dyn StorageAdapter>> {
     let mut adapters: Vec<Box<dyn StorageAdapter>> = Vec::new();
 
-    if !sql_mappings.is_empty() {
-        let builder = SqlRuntimeBuilder::new(sql_mappings);
+    // Wrap mappings so they can be consumed exactly once
+    let mut sql_mappings = Some(sql_mappings);
+    let mut doc_mappings = Some(doc_mappings);
 
-        adapters.push(Box::new(SqliteAdapter::new(
-            "sqlite".to_string(),
-            "./data/app.db".to_string(),
-            10,
-            builder,
-        )));
-    }
+    for adapter in &config.adapters {
+        match adapter {
+            AdapterConfig::Sqlite(cfg) => {
+                let mappings = sql_mappings.take().expect("sql mappings already consumed");
 
-    if !doc_mappings.is_empty() {
-        let builder = DocumentRuntimeBuilder::new(doc_mappings);
+                let builder = SqlRuntimeBuilder::new(mappings);
 
-        adapters.push(Box::new(FileDocumentAdapter::new(
-            "file".to_string(),
-            "./out/documents".into(),
-            20,
-            builder,
-        )));
+                adapters.push(Box::new(SqliteAdapter::new(
+                    cfg.id.clone(),
+                    cfg.config.path.clone(),
+                    cfg.priority,
+                    builder,
+                )));
+            }
+
+            AdapterConfig::File(cfg) => {
+                let mappings = doc_mappings
+                    .take()
+                    .expect("document mappings already consumed");
+
+                let builder = DocumentRuntimeBuilder::new(mappings);
+
+                adapters.push(Box::new(FileDocumentAdapter::new(
+                    cfg.id.clone(),
+                    cfg.config.root.clone().into(),
+                    cfg.priority,
+                    builder,
+                )));
+            }
+        }
     }
 
     adapters
