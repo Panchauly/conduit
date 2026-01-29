@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "crates/conduit-core",
+    "crates/conduit-cli"
+]
