@@ -9,28 +9,36 @@ use conduit_core::runtime::config::{
 
 use std::collections::HashMap;
 use std::env;
+use std::path::Path;
 
 // ------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------
 
 fn set_test_routing() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures");
 
-    std::env::set_current_dir(dir).expect("failed to set test cwd");
+    env::set_current_dir(dir).expect("failed to set test cwd");
+
+    // IMPORTANT: routing.json MUST match adapter IDs in this test
+    // routing.json content:
+    // {
+    //   "UserCreated": ["sqlite", "file"]
+    // }
 }
 
 // ------------------------------------------------------------
 // Test
 // ------------------------------------------------------------
+
 #[test]
 fn execute_event_runs_without_panic() {
     set_test_routing();
 
     // -----------------------------
-    // Config (Phase 5 requirement)
+    // Config
     // -----------------------------
     let config = ConduitConfig {
         version: 1,
@@ -39,14 +47,14 @@ fn execute_event_runs_without_panic() {
         },
         adapters: vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "sqlite".into(),
+                id: "sql-primary".into(),
                 priority: 10,
                 config: SqliteConfig {
                     path: ":memory:".into(),
                 },
             }),
             AdapterConfig::File(FileAdapterConfig {
-                id: "file".into(),
+                id: "doc-readmodel".into(),
                 priority: 20,
                 config: FileConfig {
                     root: "./target/test-docs".into(),
@@ -55,10 +63,10 @@ fn execute_event_runs_without_panic() {
         ],
     };
 
-    config.validate().unwrap();
+    config.validate().expect("config must be valid");
 
     // -----------------------------
-    // Mappings
+    // SQL mappings
     // -----------------------------
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
@@ -75,6 +83,9 @@ columns:
         .unwrap(),
     );
 
+    // -----------------------------
+    // Document mappings
+    // -----------------------------
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserCreated".to_string(),
@@ -102,7 +113,17 @@ document:
     // -----------------------------
     // Execute
     // -----------------------------
-    let results = execute_event(&config, sql_mappings, doc_mappings, event);
+    let report = execute_event(&config, sql_mappings, doc_mappings, event);
 
-    assert!(!results.is_empty());
+    // -----------------------------
+    // Assert
+    // -----------------------------
+    assert!(
+        !report.adapter_reports.is_empty(),
+        "UserCreated must execute at least one adapter"
+    );
+
+    for r in &report.adapter_reports {
+        assert!(!r.adapter_id.is_empty(), "adapter_id must always be set");
+    }
 }

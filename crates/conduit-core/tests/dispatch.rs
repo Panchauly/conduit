@@ -1,7 +1,8 @@
 use conduit_core::adapter::{AdapterError, AdapterResult, StorageAdapter};
 use conduit_core::dispatch::dispatch;
 use conduit_core::event::Event;
-use conduit_core::routing::StorageKind;
+use conduit_core::execution::{AdapterOutcome, ExecutionStatus};
+use conduit_core::routing::{StorageKind, route};
 
 use std::collections::HashMap;
 
@@ -16,33 +17,28 @@ struct TestAdapter {
 }
 
 impl StorageAdapter for TestAdapter {
-    fn kind(&self) -> StorageKind {
-        self.kind.clone()
-    }
-
     fn id(&self) -> &str {
         self.id
     }
 
+    fn kind(&self) -> StorageKind {
+        self.kind
+    }
+
     fn priority(&self) -> u32 {
-        10
+        0
     }
 
     fn handle(&self, _event: &Event) -> AdapterResult {
-        if self.succeed {
-            AdapterResult {
-                adapter_id: self.id.to_string(),
-                kind: self.kind.clone(),
-                success: true,
-                error: None,
-            }
-        } else {
-            AdapterResult {
-                adapter_id: self.id.to_string(),
-                kind: self.kind.clone(),
-                success: false,
-                error: Some(AdapterError::WriteFailed("forced failure".into())),
-            }
+        AdapterResult {
+            adapter_id: self.id.to_string(), // 🔴 THIS MUST MATCH routing.json
+            kind: self.kind,
+            success: self.succeed,
+            error: if self.succeed {
+                None
+            } else {
+                Some(AdapterError::WriteFailed("forced failure".to_string()))
+            },
         }
     }
 }
@@ -80,52 +76,60 @@ fn dispatch_executes_all_targeted_adapters() {
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
         Box::new(TestAdapter {
-            id: "sql",
+            id: "sql-primary",
             kind: StorageKind::Sql,
             succeed: true,
         }),
         Box::new(TestAdapter {
-            id: "doc",
+            id: "doc-readmodel",
             kind: StorageKind::Document,
             succeed: true,
         }),
     ];
 
-    let results = dispatch(&event, &mut adapters);
+    let report = dispatch(&event, &mut adapters);
 
-    assert_eq!(results.len(), 2);
-    assert!(results.iter().all(|r| r.success));
+    assert_eq!(report.adapter_reports.len(), 2);
+    assert_eq!(report.status, ExecutionStatus::Succeeded);
+    assert!(
+        report
+            .adapter_reports
+            .iter()
+            .all(|r| r.outcome == AdapterOutcome::Succeeded)
+    );
 }
 
 #[test]
-fn dispatch_continues_on_adapter_failure() {
+fn dispatch_stops_on_adapter_failure() {
     set_test_routing();
 
     let event = test_event("FailingEvent");
 
+    let targets = route(&event);
+    assert!(!targets.is_empty(), "FailingEvent must be routed");
+
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
         Box::new(TestAdapter {
-            id: "sql",
+            id: "sql-primary",
             kind: StorageKind::Sql,
             succeed: false,
         }),
         Box::new(TestAdapter {
-            id: "doc",
+            id: "doc-readmodel",
             kind: StorageKind::Document,
             succeed: true,
         }),
     ];
 
-    let results = dispatch(&event, &mut adapters);
+    let report = dispatch(&event, &mut adapters);
 
-    // Dispatch must not panic
-    // Dispatch must return results for executed adapters
-    assert!(!results.is_empty());
-
-    // All results must be well-formed
-    for r in results {
-        assert!(!r.adapter_id.is_empty());
-    }
+    assert_eq!(report.adapter_reports.len(), 1);
+    assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
+    assert_eq!(
+        report.adapter_reports[0].outcome,
+        AdapterOutcome::WriteFailed
+    );
+    assert_eq!(report.status, ExecutionStatus::Failed);
 }
 
 #[test]
@@ -136,25 +140,30 @@ fn dispatch_only_runs_routed_adapters() {
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
         Box::new(TestAdapter {
-            id: "sql",
+            id: "sql-primary",
             kind: StorageKind::Sql,
             succeed: true,
         }),
         Box::new(TestAdapter {
-            id: "doc",
+            id: "doc-readmodel",
             kind: StorageKind::Document,
             succeed: true,
         }),
         Box::new(TestAdapter {
-            id: "kv",
+            id: "kv-cache",
             kind: StorageKind::KeyValue,
             succeed: true,
         }),
     ];
 
-    let results = dispatch(&event, &mut adapters);
+    let report = dispatch(&event, &mut adapters);
 
     // routing.json selects only Sql + Document
-    assert_eq!(results.len(), 2);
-    assert!(results.iter().all(|r| r.kind != StorageKind::KeyValue));
+    assert_eq!(report.adapter_reports.len(), 2);
+    assert!(
+        report
+            .adapter_reports
+            .iter()
+            .all(|r| r.storage_kind != StorageKind::KeyValue)
+    );
 }
