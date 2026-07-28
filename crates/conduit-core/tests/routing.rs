@@ -1,5 +1,5 @@
 use conduit_core::event::Event;
-use conduit_core::routing::{StorageKind, route};
+use conduit_core::routing::route;
 
 use std::collections::HashMap;
 
@@ -29,11 +29,10 @@ fn user_created_routes_to_sql_and_document() {
 
     assert_eq!(
         targets,
-        vec![StorageKind::Sql, StorageKind::Document],
-        "UserCreated must route to SQL and Document"
+        vec!["sql-primary".to_string(), "doc-readmodel".to_string()],
+        "UserCreated must route to sql-primary and doc-readmodel adapters"
     );
 }
-
 #[test]
 fn cache_invalidated_routes_to_key_value() {
     set_test_routing();
@@ -43,8 +42,8 @@ fn cache_invalidated_routes_to_key_value() {
 
     assert_eq!(
         targets,
-        vec![StorageKind::KeyValue],
-        "CacheInvalidated must route to KeyValue"
+        vec!["kv-cache".to_string()],
+        "CacheInvalidated must route to kv-cache adapter"
     );
 }
 
@@ -55,9 +54,8 @@ fn unknown_event_routes_to_document_by_default() {
 
     let targets = route(&event);
 
-    assert_eq!(
-        targets,
-        vec![StorageKind::Document],
-        "Unknown events must route to Document by default"
+    assert!(
+        targets.is_empty(),
+        "Unknown events must not route to any adapter"
     );
 }

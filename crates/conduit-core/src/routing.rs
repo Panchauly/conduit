@@ -39,9 +39,25 @@ static ROUTING_RULES: Lazy<HashMap<String, Vec<AdapterId>>> = Lazy::new(|| {
     serde_json::from_str(&data).expect("Invalid routing.json format")
 });
 
-/// Resolve adapter IDs for an event
+/// Global routing table (cwd/env dependent). Used by [crate::dispatch::dispatch].
+pub(crate) fn global_routing_table() -> &'static HashMap<String, Vec<AdapterId>> {
+    &*ROUTING_RULES
+}
+
+/// Resolve adapter IDs for an event (uses global routing from env).
 pub fn route(event: &Event) -> Vec<AdapterId> {
-    ROUTING_RULES
+    route_with_rules(event, global_routing_table())
+}
+
+/// Resolve adapter IDs for an event given explicit routing rules (e.g. for explain / dry-run).
+///
+/// One event type may list several distinct adapters (e.g. `pgsql_master`, `pgsql_slave`); each
+/// receives the same logical projection via shared mappings, with execution order by adapter priority.
+pub fn route_with_rules(
+    event: &Event,
+    rules: &HashMap<String, Vec<AdapterId>>,
+) -> Vec<AdapterId> {
+    rules
         .get(&event.event_type)
         .cloned()
         .unwrap_or_default()

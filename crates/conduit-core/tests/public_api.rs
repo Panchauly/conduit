@@ -3,7 +3,7 @@ use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::event::Event;
 use conduit_core::execute_event;
 use conduit_core::runtime::config::{
-    AdapterConfig, ConduitConfig, FileAdapterConfig, FileConfig, RoutingConfig,
+    AdapterConfig, ConduitConfig, FailurePolicy, FileAdapterConfig, FileConfig, RoutingConfig,
     SqliteAdapterConfig, SqliteConfig,
 };
 
@@ -52,6 +52,8 @@ fn execute_event_runs_without_panic() {
                 config: SqliteConfig {
                     path: ":memory:".into(),
                 },
+                capabilities: None,
+                depends_on: vec![],
             }),
             AdapterConfig::File(FileAdapterConfig {
                 id: "doc-readmodel".into(),
@@ -59,8 +61,11 @@ fn execute_event_runs_without_panic() {
                 config: FileConfig {
                     root: "./target/test-docs".into(),
                 },
+                capabilities: None,
+                depends_on: vec![],
             }),
         ],
+        failure_policy: FailurePolicy::FailFast,
     };
 
     config.validate().expect("config must be valid");

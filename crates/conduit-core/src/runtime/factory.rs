@@ -10,24 +10,20 @@ use crate::adapter::sql::sqlite::SqliteAdapter;
 
 use crate::runtime::config::{AdapterConfig, ConduitConfig};
 
+/// Build all adapters from config. Each SQL adapter gets a **clone** of `sql_mappings`; each file
+/// adapter gets a **clone** of `document_mappings` — so one event type can route to many targets
+/// (e.g. `pgsql_master`, `pgsql_slave`) with the same projection definitions.
 pub fn build_adapters_from_config(
     config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
-    doc_mappings: HashMap<String, DocumentMapping>,
+    document_mappings: HashMap<String, DocumentMapping>,
 ) -> Vec<Box<dyn StorageAdapter>> {
     let mut adapters: Vec<Box<dyn StorageAdapter>> = Vec::new();
-
-    // Wrap mappings so they can be consumed exactly once
-    let mut sql_mappings = Some(sql_mappings);
-    let mut doc_mappings = Some(doc_mappings);
 
     for adapter in &config.adapters {
         match adapter {
             AdapterConfig::Sqlite(cfg) => {
-                let mappings = sql_mappings.take().expect("sql mappings already consumed");
-
-                let builder = SqlRuntimeBuilder::new(mappings);
-
+                let builder = SqlRuntimeBuilder::new(sql_mappings.clone());
                 adapters.push(Box::new(SqliteAdapter::new(
                     cfg.id.clone(),
                     cfg.config.path.clone(),
@@ -37,12 +33,7 @@ pub fn build_adapters_from_config(
             }
 
             AdapterConfig::File(cfg) => {
-                let mappings = doc_mappings
-                    .take()
-                    .expect("document mappings already consumed");
-
-                let builder = DocumentRuntimeBuilder::new(mappings);
-
+                let builder = DocumentRuntimeBuilder::new(document_mappings.clone());
                 adapters.push(Box::new(FileDocumentAdapter::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
@@ -53,5 +44,6 @@ pub fn build_adapters_from_config(
         }
     }
 
+    adapters.sort_by_key(|a| a.priority());
     adapters
 }

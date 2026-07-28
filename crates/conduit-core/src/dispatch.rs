@@ -1,14 +1,61 @@
+use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
 use crate::adapter::StorageAdapter;
 use crate::event::Event;
 use crate::execution::{AdapterExecutionReport, AdapterReportError, ExecutionReport};
-use crate::routing::route;
+use crate::routing::{route_with_rules, AdapterId, StorageKind};
+use crate::runtime::config::FailurePolicy;
+use crate::runtime::dependency_graph::{
+    execution_order_for_routed, AdapterExecutionMeta, DependencyOrderError,
+};
 
-/// Dispatches an event to routed adapters and returns a single [ExecutionReport].
-/// Adapter results are consumed to build the report; nothing adapter-level is returned.
-pub fn dispatch(event: &Event, adapters: &mut [Box<dyn StorageAdapter>]) -> ExecutionReport {
-    let targets = route(event);
+fn dependency_order_failure_report(event: &Event, started_at: SystemTime, message: String) -> ExecutionReport {
+    let trace_id = format!("trace-{}", event.id());
+    let mut report = ExecutionReport::new(
+        event.id().to_string(),
+        event.event_type().to_string(),
+        trace_id,
+        started_at,
+    );
+    let adapter_report = AdapterExecutionReport::new(
+        "_dispatch".to_string(),
+        StorageKind::Sql,
+        started_at,
+    )
+    .finish_failure(
+        started_at,
+        AdapterReportError::WriteFailed { message },
+    );
+    report.push_adapter_report(adapter_report);
+    report.finish(started_at)
+}
+
+pub fn dispatch(
+    event: &Event,
+    adapters: &mut [Box<dyn StorageAdapter>],
+    failure_policy: FailurePolicy,
+    adapter_meta: &HashMap<AdapterId, AdapterExecutionMeta>,
+) -> ExecutionReport {
+    dispatch_with_routing(
+        event,
+        adapters,
+        failure_policy,
+        crate::routing::global_routing_table(),
+        adapter_meta,
+    )
+}
+
+/// Dispatch using explicit routing rules (replay, tests) instead of global routing.
+pub(crate) fn dispatch_with_routing(
+    event: &Event,
+    adapters: &mut [Box<dyn StorageAdapter>],
+    failure_policy: FailurePolicy,
+    routing_rules: &HashMap<String, Vec<AdapterId>>,
+    adapter_meta: &HashMap<AdapterId, AdapterExecutionMeta>,
+) -> ExecutionReport {
+    let routed = route_with_rules(event, routing_rules);
+    let targets: HashSet<_> = routed.iter().cloned().collect();
 
     let trace_id = format!("trace-{}", event.id());
     let started_at = SystemTime::now();
@@ -20,11 +67,50 @@ pub fn dispatch(event: &Event, adapters: &mut [Box<dyn StorageAdapter>]) -> Exec
         started_at,
     );
 
-    for adapter in adapters.iter_mut() {
-        if !targets.contains(&adapter.id().to_string()) {
-            continue;
-        }
+    if targets.is_empty() {
+        return report.finish(SystemTime::now());
+    }
 
+    let order = match execution_order_for_routed(&routed, adapter_meta) {
+        Ok(o) => o,
+        Err(DependencyOrderError::Cycle { adapters }) => {
+            return dependency_order_failure_report(
+                event,
+                started_at,
+                format!(
+                    "cyclic adapter dependencies among: {}",
+                    adapters.join(", ")
+                ),
+            );
+        }
+        Err(DependencyOrderError::MissingAdapterMeta { adapter_id }) => {
+            return dependency_order_failure_report(
+                event,
+                started_at,
+                format!(
+                    "no adapter metadata for routed id {:?}",
+                    adapter_id
+                ),
+            );
+        }
+    };
+
+    let id_to_index: HashMap<String, usize> = adapters
+        .iter()
+        .enumerate()
+        .map(|(i, a)| (a.id().to_string(), i))
+        .collect();
+
+    for adapter_id in order {
+        let Some(&idx) = id_to_index.get(adapter_id.as_str()) else {
+            return dependency_order_failure_report(
+                event,
+                started_at,
+                format!("no adapter instance for id {:?}", adapter_id),
+            );
+        };
+
+        let adapter = &mut adapters[idx];
         let adapter_started_at = SystemTime::now();
         let result = adapter.handle(event);
         let adapter_finished_at = SystemTime::now();
@@ -49,8 +135,7 @@ pub fn dispatch(event: &Event, adapters: &mut [Box<dyn StorageAdapter>]) -> Exec
 
         report.push_adapter_report(adapter_report);
 
-        // Fail-fast behavior preserved
-        if !result.success {
+        if !result.success && failure_policy == FailurePolicy::FailFast {
             return report.finish(adapter_finished_at);
         }
     }

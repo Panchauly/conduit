@@ -23,6 +23,16 @@ pub enum ExecutionStatus {
     Failed,
 }
 
+/// Execution mode: normal (writes) or dry-run (no side effects).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Normal execution; adapters perform writes.
+    Run,
+    /// Simulated execution; adapters should not persist (no writes).
+    DryRun,
+}
+
 /// Outcome of a single adapter invocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

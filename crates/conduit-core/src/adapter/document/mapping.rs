@@ -1,15 +1,20 @@
 use super::adapter::DocumentError;
 use crate::event::Event;
+use crate::runtime::config::AdapterCapability;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DocumentMapping {
     pub event: String,
     pub collection: String,
 
     /// JSON-like structure where leaf values are payload/metadata paths
     pub document: Value,
+
+    /// Capabilities adapters must provide to run this projection.
+    #[serde(default)]
+    pub requires_capabilities: Vec<AdapterCapability>,
 }
 
 impl DocumentMapping {

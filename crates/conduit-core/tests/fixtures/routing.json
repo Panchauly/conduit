@@ -1,4 +1,13 @@
 {
-  "UserCreated": ["Sql", "Document"],
-  "CacheInvalidated": ["KeyValue"]
+  "UserCreated": [
+    "sql-primary",
+    "doc-readmodel"
+  ],
+  "CacheInvalidated": [
+    "kv-cache"
+  ],
+  "FailingEvent": [
+    "sql-primary",
+    "doc-readmodel"
+  ]
 }

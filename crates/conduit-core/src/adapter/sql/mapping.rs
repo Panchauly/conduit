@@ -4,9 +4,10 @@ use serde::Deserialize;
 
 use super::adapter::SqlError;
 use crate::event::Event;
+use crate::runtime::config::AdapterCapability;
 use serde_json::Value;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SqlMapping {
     pub event: String,
     pub table: String,
@@ -17,6 +18,10 @@ pub struct SqlMapping {
 
     #[serde(default)]
     pub foreign_keys: HashMap<String, String>,
+
+    /// Capabilities adapters must provide to run this projection (enum; parse-time validated).
+    #[serde(default)]
+    pub requires_capabilities: Vec<AdapterCapability>,
 }
 
 impl SqlMapping {

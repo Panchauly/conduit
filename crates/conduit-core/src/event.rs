@@ -9,3 +9,12 @@ pub struct Event {
     pub payload: String,
     pub metadata: HashMap<String, String>,
 }
+
+impl Event {
+    pub fn id(&self) -> &str {
+        return &self.event_id;
+    }
+    pub fn event_type(&self) -> &str {
+        return &self.event_type;
+    }
+}
