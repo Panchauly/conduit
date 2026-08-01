@@ -276,7 +276,7 @@ sql → search → analytics → cache → reporting
 
 ---
 
-## Phase 10 — Projection Versioning & Schema Evolution 🎯 (Planned)
+## Phase 10 — Projection Versioning & Schema Evolution ✅ (Completed)
 
 **Goal:** Support explicit event/mapping versioning and deterministic upcasting so schema evolution never breaks historical replay.
 
@@ -334,7 +334,7 @@ event (V_src) ──► UpcasterRegistry ──► event (V_target) ──► Ma
 
 ---
 
-### Phase 10.4 — Replay Determinism & Verification Suite 🧪 (Planned)
+### Phase 10.4 — Replay Determinism & Verification Suite 🧪 (Completed)
 
 **Goal:** Verify that historical event streams containing mixed payload versions ($V_1, V_2, \dots, V_n$) project deterministically.
 
