@@ -40,6 +40,7 @@ fn base_config() -> ConduitConfig {
             }),
         ],
         failure_policy: Default::default(),
+        migration_policy: Default::default(),
     }
 }
 
@@ -229,6 +230,7 @@ fn rejects_sql_mapping_when_route_has_only_file_adapters() {
             depends_on: vec![],
         })],
         failure_policy: Default::default(),
+        migration_policy: Default::default(),
     };
     config.validate().unwrap();
     let mut sql = HashMap::new();
@@ -262,6 +264,7 @@ fn rejects_document_mapping_without_file_on_route() {
             depends_on: vec![],
         })],
         failure_policy: Default::default(),
+        migration_policy: Default::default(),
     };
     config.validate().unwrap();
     let mut sql = HashMap::new();
@@ -357,6 +360,7 @@ fn rejects_duplicate_adapter_ids_in_config() {
             }),
         ],
         failure_policy: Default::default(),
+        migration_policy: Default::default(),
     };
     let mut sql = HashMap::new();
     sql.insert("UserCreated".to_string(), sql_uc());

@@ -314,7 +314,7 @@ sql → search → analytics → cache → reporting
 
 ---
 
-### Phase 10.3 — Dispatch & Migration Policy Integration ⚡ (Planned)
+### Phase 10.3 — Dispatch & Migration Policy Integration ⚡ (Completed)
 
 **Goal:** Integrate version checking and upcasting into `dispatch.rs` and `ReplayContext` with configurable migration policies.
 

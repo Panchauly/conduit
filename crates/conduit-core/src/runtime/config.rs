@@ -21,6 +21,23 @@ pub enum FailurePolicy {
 }
 
 // ------------------------------------------------------------
+// Migration Policy (Phase 10.3)
+// ------------------------------------------------------------
+
+/// Governs how a version-mismatched event (no upcaster chain to a mapping's
+/// target version) is handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MigrationPolicy {
+    /// Fail the adapter immediately when no upcaster chain exists (default).
+    #[default]
+    Strict,
+
+    /// Skip projection for un-upcastable events; batch continues.
+    IgnoreUnmatched,
+}
+
+// ------------------------------------------------------------
 // Adapter Capabilities (Phase 6.4)
 // ------------------------------------------------------------
 
@@ -59,6 +76,10 @@ pub struct ConduitConfig {
     /// When an adapter fails: fail_fast (default) or continue_on_error.
     #[serde(default)]
     pub failure_policy: FailurePolicy,
+
+    /// How version-mismatched events are handled: strict (default) or ignore_unmatched.
+    #[serde(default)]
+    pub migration_policy: MigrationPolicy,
 }
 
 impl ConduitConfig {

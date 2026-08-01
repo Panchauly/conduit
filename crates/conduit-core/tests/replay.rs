@@ -93,6 +93,7 @@ fn sample_config(doc_root: &Path, sqlite_path: &Path) -> ConduitConfig {
             }),
         ],
         failure_policy: FailurePolicy::FailFast,
+        migration_policy: Default::default(),
     }
 }
 
@@ -450,6 +451,7 @@ fn replay_user_created_writes_two_sqlite_adapters() {
             }),
         ],
         failure_policy: FailurePolicy::FailFast,
+        migration_policy: Default::default(),
     };
     config.validate().unwrap();
     let (sql, _) = user_created_mappings();

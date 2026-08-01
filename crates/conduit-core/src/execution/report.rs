@@ -42,6 +42,8 @@ pub enum AdapterOutcome {
     WriteFailed,
     /// Idempotent replay (event already applied).
     Skipped,
+    /// No upcaster chain to the mapping's target version (`MigrationPolicy::Strict`).
+    UnsupportedVersion,
 }
 
 /// Structured error for adapter execution.
@@ -50,6 +52,7 @@ pub enum AdapterOutcome {
 pub enum AdapterReportError {
     WriteFailed { message: String },
     Skipped { message: String },
+    UnsupportedVersion { message: String },
 }
 
 impl From<AdapterError> for AdapterReportError {
@@ -57,6 +60,9 @@ impl From<AdapterError> for AdapterReportError {
         match e {
             AdapterError::WriteFailed(msg) => AdapterReportError::WriteFailed { message: msg },
             AdapterError::Skipped(msg) => AdapterReportError::Skipped { message: msg },
+            AdapterError::UnsupportedVersion(msg) => {
+                AdapterReportError::UnsupportedVersion { message: msg }
+            }
         }
     }
 }
@@ -68,6 +74,9 @@ impl From<&AdapterError> for AdapterReportError {
                 message: msg.clone(),
             },
             AdapterError::Skipped(msg) => AdapterReportError::Skipped {
+                message: msg.clone(),
+            },
+            AdapterError::UnsupportedVersion(msg) => AdapterReportError::UnsupportedVersion {
                 message: msg.clone(),
             },
         }
@@ -101,10 +110,18 @@ pub struct ExecutionReport {
     pub adapter_reports: Vec<AdapterExecutionReport>,
 
     pub status: ExecutionStatus,
+
+    /// Source event payload version (Phase 10.2/10.3). Unversioned legacy events default to 1.
+    #[serde(default = "default_source_version")]
+    pub source_version: u32,
 }
 
 fn default_report_version() -> String {
     "1.0".to_string()
+}
+
+fn default_source_version() -> u32 {
+    1
 }
 
 impl ExecutionReport {
@@ -125,7 +142,14 @@ impl ExecutionReport {
             duration_ms: None,
             adapter_reports: Vec::new(),
             status: ExecutionStatus::Succeeded, // provisional, recalculated on finish
+            source_version: default_source_version(),
         }
+    }
+
+    /// Set the source event payload version (defaults to 1 if never called).
+    pub fn with_source_version(mut self, source_version: u32) -> Self {
+        self.source_version = source_version;
+        self
     }
 
     /// Add adapter report (preserves order).
@@ -142,11 +166,12 @@ impl ExecutionReport {
             .ok()
             .map(duration_to_ms);
 
-        self.status = if self
-            .adapter_reports
-            .iter()
-            .any(|r| r.outcome == AdapterOutcome::WriteFailed)
-        {
+        self.status = if self.adapter_reports.iter().any(|r| {
+            matches!(
+                r.outcome,
+                AdapterOutcome::WriteFailed | AdapterOutcome::UnsupportedVersion
+            )
+        }) {
             ExecutionStatus::Failed
         } else {
             ExecutionStatus::Succeeded
@@ -181,6 +206,14 @@ pub struct AdapterExecutionReport {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<AdapterReportError>,
+
+    /// Event payload version this adapter observed (Phase 10.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_version: Option<u32>,
+
+    /// Mapping's target schema version this adapter projected into (Phase 10.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected_version: Option<u32>,
 }
 
 impl AdapterExecutionReport {
@@ -194,7 +227,20 @@ impl AdapterExecutionReport {
             duration_ms: None,
             outcome: AdapterOutcome::Succeeded, // provisional
             error: None,
+            source_version: None,
+            projected_version: None,
         }
+    }
+
+    /// Attach observed/target schema versions (Phase 10.3).
+    pub fn with_versions(
+        mut self,
+        source_version: Option<u32>,
+        projected_version: Option<u32>,
+    ) -> Self {
+        self.source_version = source_version;
+        self.projected_version = projected_version;
+        self
     }
 
     /// Finish successfully.
@@ -223,6 +269,7 @@ impl AdapterExecutionReport {
         self.outcome = match &error {
             AdapterReportError::WriteFailed { .. } => AdapterOutcome::WriteFailed,
             AdapterReportError::Skipped { .. } => AdapterOutcome::Skipped,
+            AdapterReportError::UnsupportedVersion { .. } => AdapterOutcome::UnsupportedVersion,
         };
 
         self.error = Some(error);
@@ -301,6 +348,36 @@ mod tests {
         let report = report.finish(finished);
 
         assert_eq!(report.status, ExecutionStatus::Failed);
+    }
+
+    #[test]
+    fn finish_marks_failed_when_adapter_has_unsupported_version() {
+        let started = SystemTime::now();
+        let finished = started + Duration::from_millis(10);
+
+        let mut report =
+            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started)
+                .with_source_version(1);
+        report.push_adapter_report(
+            AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
+                .with_versions(Some(1), Some(2))
+                .finish_failure(
+                    finished,
+                    AdapterReportError::UnsupportedVersion {
+                        message: "no upcaster chain".to_string(),
+                    },
+                ),
+        );
+        let report = report.finish(finished);
+
+        assert_eq!(report.status, ExecutionStatus::Failed);
+        assert_eq!(report.source_version, 1);
+        assert_eq!(report.adapter_reports[0].source_version, Some(1));
+        assert_eq!(report.adapter_reports[0].projected_version, Some(2));
+        assert_eq!(
+            report.adapter_reports[0].outcome,
+            AdapterOutcome::UnsupportedVersion
+        );
     }
 
     #[test]

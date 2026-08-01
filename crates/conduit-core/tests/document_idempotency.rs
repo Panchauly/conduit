@@ -3,8 +3,11 @@ use conduit_core::adapter::document::file::FileDocumentAdapter;
 use conduit_core::adapter::document::mapping::DocumentMapping;
 use conduit_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use conduit_core::event::Event;
+use conduit_core::runtime::config::MigrationPolicy;
+use conduit_core::upcast::UpcasterRegistry;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use tempfile::tempdir;
 
 // ------------------------------------------------------------
@@ -49,7 +52,14 @@ document:
 
     let builder = DocumentRuntimeBuilder::new(doc_mappings);
 
-    let adapter = FileDocumentAdapter::new("file".to_string(), root.to_path_buf(), 10, builder);
+    let adapter = FileDocumentAdapter::new(
+        "file".to_string(),
+        root.to_path_buf(),
+        10,
+        builder,
+        Arc::new(UpcasterRegistry::new()),
+        MigrationPolicy::default(),
+    );
 
     let event = test_event();
 

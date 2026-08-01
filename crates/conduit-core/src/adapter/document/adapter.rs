@@ -11,6 +11,14 @@ pub enum DocumentError {
 
     /// Failed to write the document to storage
     WriteFailed(String),
+
+    /// No upcaster chain from the event's version to the mapping's target version.
+    UnsupportedVersion {
+        event_type: String,
+        from_version: u32,
+        to_version: u32,
+        reason: String,
+    },
 }
 
 impl fmt::Display for DocumentError {
@@ -25,6 +33,16 @@ impl fmt::Display for DocumentError {
             DocumentError::WriteFailed(msg) => {
                 write!(f, "document write failed: {}", msg)
             }
+            DocumentError::UnsupportedVersion {
+                event_type,
+                from_version,
+                to_version,
+                reason,
+            } => write!(
+                f,
+                "cannot project event {:?} from v{} to mapping v{}: {}",
+                event_type, from_version, to_version, reason
+            ),
         }
     }
 }

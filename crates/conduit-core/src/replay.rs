@@ -264,7 +264,8 @@ fn unrouted_event_report(event: &Event) -> ExecutionReport {
         event.event_type.clone(),
         trace_id,
         now,
-    );
+    )
+    .with_source_version(event.version());
     let adapter_report = AdapterExecutionReport::new(
         "routing".to_string(),
         StorageKind::Sql,
@@ -293,14 +294,38 @@ pub struct ReplayContext {
 
 impl ReplayContext {
     /// Build adapters once (multiple SQL or file adapters each get a clone of the mapping bundle).
+    /// Runs with an empty [crate::upcast::UpcasterRegistry]; use [ReplayContext::new_with_upcasters]
+    /// to replay mixed-version streams through registered upcasters (Phase 10.3/10.4).
     pub fn new(
         config: &ConduitConfig,
         routing_rules: HashMap<String, Vec<AdapterId>>,
         sql_mappings: HashMap<String, SqlMapping>,
         document_mappings: HashMap<String, DocumentMapping>,
     ) -> Self {
+        Self::new_with_upcasters(
+            config,
+            routing_rules,
+            sql_mappings,
+            document_mappings,
+            std::sync::Arc::new(crate::upcast::UpcasterRegistry::new()),
+        )
+    }
+
+    /// Same as [ReplayContext::new], with an explicit [crate::upcast::UpcasterRegistry].
+    pub fn new_with_upcasters(
+        config: &ConduitConfig,
+        routing_rules: HashMap<String, Vec<AdapterId>>,
+        sql_mappings: HashMap<String, SqlMapping>,
+        document_mappings: HashMap<String, DocumentMapping>,
+        upcasters: std::sync::Arc<crate::upcast::UpcasterRegistry>,
+    ) -> Self {
         Self {
-            adapters: build_adapters_from_config(config, sql_mappings, document_mappings),
+            adapters: build_adapters_from_config(
+                config,
+                sql_mappings,
+                document_mappings,
+                upcasters,
+            ),
             failure_policy: config.failure_policy,
             routing_rules,
             adapter_meta: adapter_metadata_map(config),

@@ -32,15 +32,15 @@ impl StorageAdapter for TestAdapter {
     }
 
     fn handle(&self, _event: &Event) -> AdapterResult {
-        AdapterResult {
-            adapter_id: self.id.to_string(), // 🔴 THIS MUST MATCH routing.json
-            kind: self.kind,
-            success: self.succeed,
-            error: if self.succeed {
-                None
-            } else {
-                Some(AdapterError::WriteFailed("forced failure".to_string()))
-            },
+        // adapter_id 🔴 THIS MUST MATCH routing.json
+        if self.succeed {
+            AdapterResult::success(self.id.to_string(), self.kind)
+        } else {
+            AdapterResult::failure(
+                self.id.to_string(),
+                self.kind,
+                AdapterError::WriteFailed("forced failure".to_string()),
+            )
         }
     }
 }

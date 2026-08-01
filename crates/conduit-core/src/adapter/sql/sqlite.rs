@@ -1,11 +1,16 @@
-use rusqlite::{Connection, params, params_from_iter};
+use std::sync::Arc;
+
+use rusqlite::{params, params_from_iter, Connection};
 use serde_json::Value;
 
 use crate::{
+    adapter::sql::adapter::SqlError,
     adapter::sql::runtime::SqlRuntimeBuilder,
     adapter::{AdapterError, AdapterResult, StorageAdapter},
     event::Event,
     routing::StorageKind,
+    runtime::config::MigrationPolicy,
+    upcast::UpcasterRegistry,
 };
 
 /// SQLite runtime adapter (Phase 4: idempotent)
@@ -14,16 +19,31 @@ pub struct SqliteAdapter {
     priority: u32,
     path: String,
     builder: SqlRuntimeBuilder,
+    upcasters: Arc<UpcasterRegistry>,
+    migration_policy: MigrationPolicy,
 }
 
 impl SqliteAdapter {
-    pub fn new(id: String, path: String, priority: u32, builder: SqlRuntimeBuilder) -> Self {
+    pub fn new(
+        id: String,
+        path: String,
+        priority: u32,
+        builder: SqlRuntimeBuilder,
+        upcasters: Arc<UpcasterRegistry>,
+        migration_policy: MigrationPolicy,
+    ) -> Self {
         Self {
             id,
             path,
             priority,
             builder,
+            upcasters,
+            migration_policy,
         }
+    }
+
+    fn failure(&self, error: AdapterError) -> AdapterResult {
+        AdapterResult::failure(self.id.clone(), StorageKind::Sql, error)
     }
 }
 
@@ -41,29 +61,44 @@ impl StorageAdapter for SqliteAdapter {
     }
 
     fn handle(&self, event: &Event) -> AdapterResult {
-        // Build SQL projection
-        let (sql, values) = match self.builder.build(event) {
-            Ok(v) => v,
-            Err(e) => {
-                return AdapterResult {
-                    adapter_id: self.id.clone(),
-                    kind: StorageKind::Sql,
-                    success: false,
-                    error: Some(AdapterError::WriteFailed(e.to_string())),
+        // Build SQL projection (upcasting the payload to the mapping's target version first)
+        let projection = match self.builder.build(event, &self.upcasters) {
+            Ok(p) => p,
+            Err(SqlError::UnsupportedVersion {
+                from_version,
+                to_version,
+                reason,
+                ..
+            }) => {
+                return match self.migration_policy {
+                    MigrationPolicy::Strict => AdapterResult::unsupported_version(
+                        self.id.clone(),
+                        StorageKind::Sql,
+                        reason,
+                        from_version,
+                        to_version,
+                    ),
+                    MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_version(
+                        self.id.clone(),
+                        StorageKind::Sql,
+                        reason,
+                        from_version,
+                        to_version,
+                    ),
                 };
             }
+            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
+        let (sql, values, source_version, projected_version) = (
+            projection.sql,
+            projection.values,
+            projection.source_version,
+            projection.projected_version,
+        );
 
         let mut conn = match Connection::open(&self.path) {
             Ok(c) => c,
-            Err(e) => {
-                return AdapterResult {
-                    adapter_id: self.id.clone(),
-                    kind: StorageKind::Sql,
-                    success: false,
-                    error: Some(AdapterError::WriteFailed(e.to_string())),
-                };
-            }
+            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
         // PHASE 4: ensure idempotency table exists
@@ -74,24 +109,12 @@ impl StorageAdapter for SqliteAdapter {
             )",
             [],
         ) {
-            return AdapterResult {
-                adapter_id: self.id.clone(),
-                kind: StorageKind::Sql,
-                success: false,
-                error: Some(AdapterError::WriteFailed(e.to_string())),
-            };
+            return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
         let tx = match conn.transaction() {
             Ok(tx) => tx,
-            Err(e) => {
-                return AdapterResult {
-                    adapter_id: self.id.clone(),
-                    kind: StorageKind::Sql,
-                    success: false,
-                    error: Some(AdapterError::WriteFailed(e.to_string())),
-                };
-            }
+            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
         // PHASE 4: idempotency check
@@ -102,23 +125,17 @@ impl StorageAdapter for SqliteAdapter {
         ) {
             Ok(_) => true,
             Err(rusqlite::Error::QueryReturnedNoRows) => false,
-            Err(e) => {
-                return AdapterResult {
-                    adapter_id: self.id.clone(),
-                    kind: StorageKind::Sql,
-                    success: false,
-                    error: Some(AdapterError::WriteFailed(e.to_string())),
-                };
-            }
+            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
         if already_processed {
-            return AdapterResult {
-                adapter_id: self.id.clone(),
-                kind: StorageKind::Sql,
-                success: true,
-                error: Some(AdapterError::Skipped("event already processed".into())),
-            };
+            return AdapterResult::skipped_version(
+                self.id.clone(),
+                StorageKind::Sql,
+                "event already processed".to_string(),
+                source_version,
+                projected_version,
+            );
         }
 
         // Convert JSON values
@@ -135,12 +152,7 @@ impl StorageAdapter for SqliteAdapter {
 
         // Execute projection
         if let Err(e) = tx.execute(&sql, params_from_iter(params.iter())) {
-            return AdapterResult {
-                adapter_id: self.id.clone(),
-                kind: StorageKind::Sql,
-                success: false,
-                error: Some(AdapterError::WriteFailed(e.to_string())),
-            };
+            return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
         // PHASE 4: record event as processed
@@ -149,28 +161,18 @@ impl StorageAdapter for SqliteAdapter {
              VALUES (?, datetime('now'))",
             params![event.event_id],
         ) {
-            return AdapterResult {
-                adapter_id: self.id.clone(),
-                kind: StorageKind::Sql,
-                success: false,
-                error: Some(AdapterError::WriteFailed(e.to_string())),
-            };
+            return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
         if let Err(e) = tx.commit() {
-            return AdapterResult {
-                adapter_id: self.id.clone(),
-                kind: StorageKind::Sql,
-                success: false,
-                error: Some(AdapterError::WriteFailed(e.to_string())),
-            };
+            return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
-        AdapterResult {
-            adapter_id: self.id.clone(),
-            kind: StorageKind::Sql,
-            success: true,
-            error: None,
-        }
+        AdapterResult::success_versioned(
+            self.id.clone(),
+            StorageKind::Sql,
+            source_version,
+            projected_version,
+        )
     }
 }

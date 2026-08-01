@@ -17,7 +17,8 @@ fn dependency_order_failure_report(event: &Event, started_at: SystemTime, messag
         event.event_type().to_string(),
         trace_id,
         started_at,
-    );
+    )
+    .with_source_version(event.version());
     let adapter_report = AdapterExecutionReport::new(
         "_dispatch".to_string(),
         StorageKind::Sql,
@@ -75,7 +76,8 @@ pub(crate) fn dispatch_with_routing(
         event.event_type().to_string(),
         trace_id,
         started_at,
-    );
+    )
+    .with_source_version(event.version());
 
     if targets.is_empty() {
         return report.finish(SystemTime::now());
@@ -129,7 +131,8 @@ pub(crate) fn dispatch_with_routing(
             adapter.id().to_string(),
             adapter.kind(),
             adapter_started_at,
-        );
+        )
+        .with_versions(result.source_version, result.projected_version);
 
         let adapter_report = if result.success {
             adapter_report.finish_success(adapter_finished_at)

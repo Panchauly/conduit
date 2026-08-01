@@ -2,9 +2,12 @@ use conduit_core::adapter::StorageAdapter;
 use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use conduit_core::adapter::sql::sqlite::SqliteAdapter;
 use conduit_core::event::Event;
+use conduit_core::runtime::config::MigrationPolicy;
+use conduit_core::upcast::UpcasterRegistry;
 
 use rusqlite::Connection;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tempfile::tempdir;
 
 // ------------------------------------------------------------
@@ -74,6 +77,8 @@ columns:
         db_path.to_string_lossy().to_string(),
         10,
         builder,
+        Arc::new(UpcasterRegistry::new()),
+        MigrationPolicy::default(),
     );
 
     let event = test_event();

@@ -373,6 +373,14 @@ fn print_text_report(report: &ExecutionReport) {
                     extract_error(r.error.as_ref())
                 );
             }
+            AdapterOutcome::UnsupportedVersion => {
+                println!(
+                    "✗ {} ({}) — unsupported version: {}",
+                    r.adapter_id,
+                    format_storage_kind(r.storage_kind),
+                    extract_error(r.error.as_ref())
+                );
+            }
         }
     }
 
@@ -399,6 +407,7 @@ fn extract_error(err: Option<&AdapterReportError>) -> &str {
     match err {
         Some(AdapterReportError::WriteFailed { message }) => message,
         Some(AdapterReportError::Skipped { message }) => message,
+        Some(AdapterReportError::UnsupportedVersion { message }) => message,
         None => "unknown",
     }
 }

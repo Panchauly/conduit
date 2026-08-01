@@ -9,6 +9,7 @@ pub mod runtime;
 pub mod upcast;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::{
     adapter::{document::mapping::DocumentMapping, sql::mapping::SqlMapping},
@@ -67,6 +68,11 @@ pub mod report {
 /// public API for execution — not internal, not incidental. The report is
 /// the single contract for observability and outcome.
 ///
+/// Runs with an empty [UpcasterRegistry] — events whose version doesn't match
+/// a mapping's target version are handled per `config.migration_policy` with no
+/// upcaster chain available. Use [execute_event_with_upcasters] to register
+/// upcasters for schema-evolving payloads.
+///
 /// Requirements:
 /// - `config.validate()` MUST be called before this function
 /// - call [`validate_projection_config`] at startup when config + routing + mappings are loaded (CLI does this for run/replay/dry-run)
@@ -78,7 +84,26 @@ pub fn execute_event(
     document_mappings: HashMap<String, DocumentMapping>,
     event: Event,
 ) -> ExecutionReport {
-    let mut adapters = build_adapters_from_config(config, sql_mappings, document_mappings);
+    execute_event_with_upcasters(
+        config,
+        sql_mappings,
+        document_mappings,
+        event,
+        Arc::new(UpcasterRegistry::new()),
+    )
+}
+
+/// Same as [execute_event], with an explicit [UpcasterRegistry] (Phase 10.3) for
+/// projecting version-mismatched event payloads before mapping.
+pub fn execute_event_with_upcasters(
+    config: &ConduitConfig,
+    sql_mappings: HashMap<String, SqlMapping>,
+    document_mappings: HashMap<String, DocumentMapping>,
+    event: Event,
+    upcasters: Arc<UpcasterRegistry>,
+) -> ExecutionReport {
+    let mut adapters =
+        build_adapters_from_config(config, sql_mappings, document_mappings, upcasters);
     let adapter_meta = crate::runtime::adapter_metadata_map(config);
     dispatch(
         &event,
@@ -103,7 +128,12 @@ pub fn execute_event_with_mode(
             execute_event(config, sql_mappings, document_mappings, event)
         }
         crate::execution::ExecutionMode::DryRun => {
-            let mut adapters = build_adapters_from_config(config, sql_mappings, document_mappings);
+            let mut adapters = build_adapters_from_config(
+                config,
+                sql_mappings,
+                document_mappings,
+                Arc::new(UpcasterRegistry::new()),
+            );
             let adapter_meta = crate::runtime::adapter_metadata_map(config);
             dispatch(
                 &event,
