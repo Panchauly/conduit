@@ -282,7 +282,7 @@ sql → search → analytics → cache → reporting
 
 ---
 
-### Phase 10.1 — Versioned Event Envelopes & Mapping Specs 🎯 (Planned)
+### Phase 10.1 — Versioned Event Envelopes & Mapping Specs ✅ (Completed)
 
 **Goal:** Establish explicit version tracking on event envelopes and YAML mapping specs without breaking existing $V_1$ workflows.
 
