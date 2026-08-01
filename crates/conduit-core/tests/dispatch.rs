@@ -142,7 +142,7 @@ fn dispatch_stops_on_adapter_failure() {
 
     let event = test_event("FailingEvent");
 
-    let targets = route(&event);
+    let targets = route(&event).expect("routing table loads from test fixtures");
     assert!(!targets.is_empty(), "FailingEvent must be routed");
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![

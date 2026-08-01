@@ -7,6 +7,7 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
 use crate::event::Event;
+use crate::runtime::error::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -31,22 +32,23 @@ impl fmt::Display for StorageKind {
     }
 }
 
-static ROUTING_RULES: Lazy<HashMap<String, Vec<AdapterId>>> = Lazy::new(|| {
+static ROUTING_RULES: Lazy<Result<HashMap<String, Vec<AdapterId>>, RuntimeError>> = Lazy::new(|| {
     let path = std::env::var("ROUTING_CONFIG").unwrap_or_else(|_| "routing.json".to_string());
 
-    let data = fs::read_to_string(path).expect("Failed to read routing.json");
+    let data = fs::read_to_string(&path)
+        .map_err(|e| RuntimeError::RoutingConfigUnreadable(format!("{}: {}", path, e)))?;
 
-    serde_json::from_str(&data).expect("Invalid routing.json format")
+    serde_json::from_str(&data).map_err(|e| RuntimeError::RoutingConfigInvalid(format!("{}: {}", path, e)))
 });
 
 /// Global routing table (cwd/env dependent). Used by [crate::dispatch::dispatch].
-pub(crate) fn global_routing_table() -> &'static HashMap<String, Vec<AdapterId>> {
-    &*ROUTING_RULES
+pub(crate) fn global_routing_table() -> Result<&'static HashMap<String, Vec<AdapterId>>, RuntimeError> {
+    ROUTING_RULES.as_ref().map_err(Clone::clone)
 }
 
 /// Resolve adapter IDs for an event (uses global routing from env).
-pub fn route(event: &Event) -> Vec<AdapterId> {
-    route_with_rules(event, global_routing_table())
+pub fn route(event: &Event) -> Result<Vec<AdapterId>, RuntimeError> {
+    Ok(route_with_rules(event, global_routing_table()?))
 }
 
 /// Resolve adapter IDs for an event given explicit routing rules (e.g. for explain / dry-run).

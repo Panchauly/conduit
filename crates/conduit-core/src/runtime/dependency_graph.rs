@@ -82,11 +82,15 @@ pub fn execution_order_for_routed(
     let mut in_degree: HashMap<AdapterId, usize> = nodes.iter().map(|id| (id.clone(), 0)).collect();
     let mut successors: HashMap<AdapterId, Vec<AdapterId>> = HashMap::new();
 
+    // Every `n` is present in `meta` and `in_degree` by construction (both were
+    // built from `nodes`, and membership in `meta` was checked above); the
+    // `if let`/`entry` forms below fall through harmlessly rather than panicking
+    // if that invariant is ever violated.
     for n in &nodes {
-        let m = meta.get(n).expect("checked");
+        let Some(m) = meta.get(n) else { continue };
         for d in &m.depends_on {
             if nodes.contains(d) {
-                *in_degree.get_mut(n).expect("n in nodes") += 1;
+                *in_degree.entry(n.clone()).or_insert(0) += 1;
                 successors.entry(d.clone()).or_default().push(n.clone());
             }
         }
@@ -96,7 +100,7 @@ pub fn execution_order_for_routed(
         .iter()
         .filter(|(_, deg)| **deg == 0)
         .map(|(id, _)| {
-            let p = meta.get(id).expect("id in nodes").priority;
+            let p = meta.get(id).map(|m| m.priority).unwrap_or(u32::MAX);
             std::cmp::Reverse(ReadyKey {
                 priority: p,
                 id: id.clone(),
@@ -109,10 +113,10 @@ pub fn execution_order_for_routed(
         order.push(k.id.clone());
         if let Some(succs) = successors.get(&k.id) {
             for s in succs {
-                let deg = in_degree.get_mut(s).expect("s in nodes");
+                let Some(deg) = in_degree.get_mut(s) else { continue };
                 *deg -= 1;
                 if *deg == 0 {
-                    let p = meta.get(s).expect("s in nodes").priority;
+                    let p = meta.get(s).map(|m| m.priority).unwrap_or(u32::MAX);
                     heap.push(std::cmp::Reverse(ReadyKey {
                         priority: p,
                         id: s.clone(),
@@ -184,11 +188,11 @@ pub fn dependency_layers_grouped(
     debug_assert_eq!(execution_order.len(), layers.len());
     let mut out: Vec<(u32, Vec<AdapterId>)> = Vec::new();
     for (id, &layer) in execution_order.iter().zip(layers.iter()) {
-        if let Some((last_l, v)) = out.last_mut() {
-            if *last_l == layer {
-                v.push(id.clone());
-                continue;
-            }
+        if let Some((last_l, v)) = out.last_mut()
+            && *last_l == layer
+        {
+            v.push(id.clone());
+            continue;
         }
         out.push((layer, vec![id.clone()]));
     }
