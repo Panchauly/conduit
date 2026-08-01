@@ -245,7 +245,7 @@ impl ReplayReport {
 // ---------------------------------------------------------------------------
 
 /// Optional replay behavior: cap per-event rows, progress, strict routing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ReplayRunOptions {
     /// When `Some(n)`, only the first `n` successful events get a `per_event` row; failures are always recorded.
     /// `None` = record every event (default).
@@ -254,16 +254,6 @@ pub struct ReplayRunOptions {
     pub progress_interval: Option<usize>,
     /// If true, events with no routing targets fail without calling adapters.
     pub validate_routing: bool,
-}
-
-impl Default for ReplayRunOptions {
-    fn default() -> Self {
-        Self {
-            max_per_event_summaries: None,
-            progress_interval: None,
-            validate_routing: false,
-        }
-    }
 }
 
 fn unrouted_event_report(event: &Event) -> ExecutionReport {
@@ -362,9 +352,8 @@ impl ReplayContext {
                 }
             }
 
-            let record_summary = !succeeded
-                || cap.is_none()
-                || report.per_event.len() < cap.unwrap();
+            let record_summary =
+                !succeeded || cap.is_none_or(|c| report.per_event.len() < c);
             if record_summary {
                 report.per_event.push(PerEventReplaySummary {
                     event_id: event.event_id,
@@ -375,13 +364,14 @@ impl ReplayContext {
                 report.per_event_summaries_omitted += 1;
             }
 
-            if let Some(k) = opts.progress_interval {
-                if k > 0 && report.events_processed % k as u64 == 0 {
-                    eprintln!(
-                        "conduit replay: {} events processed",
-                        report.events_processed
-                    );
-                }
+            if let Some(k) = opts.progress_interval
+                && k > 0
+                && report.events_processed.is_multiple_of(k as u64)
+            {
+                eprintln!(
+                    "conduit replay: {} events processed",
+                    report.events_processed
+                );
             }
 
             if !succeeded && self.failure_policy == FailurePolicy::FailFast {

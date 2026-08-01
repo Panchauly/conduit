@@ -8,13 +8,11 @@ pub fn validate_sql_mappings(
 ) -> Result<(), String> {
     // Rule A: routing → mapping
     for (event, targets) in routing {
-        if targets.contains(&StorageKind::Sql) {
-            if !sql_mappings.contains_key(event) {
-                return Err(format!(
-                    "Routing includes SQL for event '{}' but no SQL mapping found",
-                    event
-                ));
-            }
+        if targets.contains(&StorageKind::Sql) && !sql_mappings.contains_key(event) {
+            return Err(format!(
+                "Routing includes SQL for event '{}' but no SQL mapping found",
+                event
+            ));
         }
     }
 

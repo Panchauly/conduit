@@ -100,8 +100,18 @@ impl StorageAdapter for FileDocumentAdapter {
         // --------------------------------------------------
         // PHASE 4: Record idempotency guard (AFTER write)
         // --------------------------------------------------
-        if let Err(e) = std::fs::create_dir_all(guard.parent().unwrap())
-            .and_then(|_| std::fs::write(&guard, "ok"))
+        let Some(guard_parent) = guard.parent() else {
+            return AdapterResult {
+                adapter_id: self.id.clone(),
+                kind: StorageKind::Document,
+                success: false,
+                error: Some(AdapterError::WriteFailed(
+                    "idempotency guard path has no parent directory".to_string(),
+                )),
+            };
+        };
+        if let Err(e) =
+            std::fs::create_dir_all(guard_parent).and_then(|_| std::fs::write(&guard, "ok"))
         {
             return AdapterResult {
                 adapter_id: self.id.clone(),

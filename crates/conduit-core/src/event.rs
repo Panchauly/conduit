@@ -12,9 +12,9 @@ pub struct Event {
 
 impl Event {
     pub fn id(&self) -> &str {
-        return &self.event_id;
+        &self.event_id
     }
     pub fn event_type(&self) -> &str {
-        return &self.event_type;
+        &self.event_type
     }
 }

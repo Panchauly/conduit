@@ -238,3 +238,132 @@ impl AdapterExecutionReport {
 fn duration_to_ms(d: Duration) -> u64 {
     d.as_millis() as u64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_report_has_provisional_succeeded_status() {
+        let started = SystemTime::now();
+        let report = ExecutionReport::new(
+            "evt-1".to_string(),
+            "TestEvent".to_string(),
+            "trace-1".to_string(),
+            started,
+        );
+
+        assert_eq!(report.status, ExecutionStatus::Succeeded);
+        assert!(report.finished_at.is_none());
+        assert!(report.duration_ms.is_none());
+        assert!(report.adapter_reports.is_empty());
+        assert_eq!(report.report_version, "1.0");
+    }
+
+    #[test]
+    fn finish_computes_duration_and_succeeded_status() {
+        let started = SystemTime::now();
+        let finished = started + Duration::from_millis(250);
+
+        let mut report =
+            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started);
+        report.push_adapter_report(
+            AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
+                .finish_success(finished),
+        );
+        let report = report.finish(finished);
+
+        assert_eq!(report.status, ExecutionStatus::Succeeded);
+        assert_eq!(report.duration_ms, Some(250));
+        assert_eq!(report.finished_at, Some(finished));
+    }
+
+    #[test]
+    fn finish_marks_failed_when_any_adapter_write_failed() {
+        let started = SystemTime::now();
+        let finished = started + Duration::from_millis(10);
+
+        let mut report =
+            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started);
+        report.push_adapter_report(
+            AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
+                .finish_success(finished),
+        );
+        report.push_adapter_report(
+            AdapterExecutionReport::new("doc".to_string(), StorageKind::Document, started)
+                .finish_failure(
+                    finished,
+                    AdapterReportError::WriteFailed {
+                        message: "boom".to_string(),
+                    },
+                ),
+        );
+        let report = report.finish(finished);
+
+        assert_eq!(report.status, ExecutionStatus::Failed);
+    }
+
+    #[test]
+    fn finish_failure_with_skipped_error_does_not_fail_overall_status() {
+        let started = SystemTime::now();
+
+        let mut report =
+            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started);
+        let adapter = AdapterExecutionReport::new("doc".to_string(), StorageKind::Document, started)
+            .finish_failure(
+                started,
+                AdapterReportError::Skipped {
+                    message: "already applied".to_string(),
+                },
+            );
+
+        assert_eq!(adapter.outcome, AdapterOutcome::Skipped);
+
+        report.push_adapter_report(adapter);
+        let report = report.finish(started);
+
+        assert_eq!(report.status, ExecutionStatus::Succeeded);
+    }
+
+    #[test]
+    fn finish_leaves_duration_none_when_finished_before_started() {
+        let started = SystemTime::now();
+        let finished = started - Duration::from_millis(50);
+
+        let report =
+            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started)
+                .finish(finished);
+
+        assert_eq!(report.duration_ms, None);
+        assert_eq!(report.finished_at, Some(finished));
+    }
+
+    #[test]
+    fn adapter_error_conversions_preserve_message() {
+        let err = AdapterError::WriteFailed("oops".to_string());
+
+        let by_ref: AdapterReportError = (&err).into();
+        assert_eq!(
+            by_ref,
+            AdapterReportError::WriteFailed {
+                message: "oops".to_string()
+            }
+        );
+
+        let owned: AdapterReportError = err.into();
+        assert_eq!(
+            owned,
+            AdapterReportError::WriteFailed {
+                message: "oops".to_string()
+            }
+        );
+
+        let skipped: AdapterReportError = AdapterError::Skipped("done already".to_string()).into();
+        assert_eq!(
+            skipped,
+            AdapterReportError::Skipped {
+                message: "done already".to_string()
+            }
+        );
+    }
+}

@@ -405,7 +405,23 @@ pub fn validate_routing_and_dependencies_for_event_type(
         return Err(report);
     }
 
-    Ok(execution_order_for_routed(adapter_ids, &adapter_meta).unwrap())
+    match execution_order_for_routed(adapter_ids, &adapter_meta) {
+        Ok(order) => Ok(order),
+        Err(DependencyOrderError::Cycle { adapters }) => {
+            report.push(ValidationIssue::DependencyCycle {
+                event_type: event_type.to_string(),
+                adapters,
+            });
+            Err(report)
+        }
+        Err(DependencyOrderError::MissingAdapterMeta { adapter_id }) => {
+            report.push(ValidationIssue::UnknownAdapter {
+                event_type: event_type.to_string(),
+                adapter_id,
+            });
+            Err(report)
+        }
+    }
 }
 
 /// Full Phase 8 validation: routing ↔ adapters ↔ mappings ↔ capabilities, plus orphan mappings.
