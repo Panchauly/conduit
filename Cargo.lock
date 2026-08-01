@@ -139,7 +139,6 @@ dependencies = [
  "clap",
  "conduit-core",
  "serde_json",
- "serde_yaml",
 ]
 
 [[package]]

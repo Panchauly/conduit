@@ -1,0 +1,264 @@
+//! High-level command orchestration for CLI-style front ends.
+//!
+//! Bundles config/mapping/routing loading, validation, and execution behind a
+//! small set of functions so front ends (e.g. `conduit-cli`) stay limited to
+//! argument parsing and result rendering — no raw file I/O or adapter setup.
+
+use core::fmt;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::adapter::document::loader::load_document_mappings;
+use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::sql::loader::load_sql_mappings;
+use crate::adapter::sql::mapping::SqlMapping;
+use crate::event::Event;
+use crate::execution::{ExecutionMode, ExecutionReport};
+use crate::replay::{
+    events_from_path, ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptions,
+};
+use crate::routing::{load_routing, route_with_rules, AdapterId};
+use crate::runtime::config::{ConduitConfig, ConfigError};
+use crate::runtime::{
+    adapter_metadata_map, dependency_depth_exceeds_recommended, dependency_layers_grouped,
+    dependency_layers_parallel, validate_projection_config,
+    validate_routing_and_dependencies_for_event_type, ValidationReport,
+};
+use crate::{execute_event, execute_event_with_mode};
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub enum PipelineError {
+    Io(std::io::Error),
+    ConfigParse(String),
+    Config(ConfigError),
+    Mapping(String),
+    Routing(String),
+    Validation(ValidationReport),
+    EventParse(String),
+    Replay(ReplayLoadError),
+}
+
+impl fmt::Display for PipelineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PipelineError::Io(e) => write!(f, "{}", e),
+            PipelineError::ConfigParse(msg) => write!(f, "failed to parse config: {}", msg),
+            PipelineError::Config(e) => write!(f, "{}", e),
+            PipelineError::Mapping(msg) => write!(f, "{}", msg),
+            PipelineError::Routing(msg) => write!(f, "{}", msg),
+            PipelineError::Validation(report) => write!(f, "{}", report),
+            PipelineError::EventParse(msg) => write!(f, "failed to parse event: {}", msg),
+            PipelineError::Replay(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for PipelineError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PipelineError::Io(e) => Some(e),
+            PipelineError::Config(e) => Some(e),
+            PipelineError::Validation(e) => Some(e),
+            PipelineError::Replay(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for PipelineError {
+    fn from(e: std::io::Error) -> Self {
+        PipelineError::Io(e)
+    }
+}
+
+impl From<ConfigError> for PipelineError {
+    fn from(e: ConfigError) -> Self {
+        PipelineError::Config(e)
+    }
+}
+
+impl From<ValidationReport> for PipelineError {
+    fn from(e: ValidationReport) -> Self {
+        PipelineError::Validation(e)
+    }
+}
+
+impl From<ReplayLoadError> for PipelineError {
+    fn from(e: ReplayLoadError) -> Self {
+        PipelineError::Replay(e)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Loading
+// ---------------------------------------------------------------------------
+
+/// Resolve the routing file path relative to the directory containing `config_path`.
+pub fn resolve_routing_path(config_path: &Path, routing_file: &str) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(routing_file)
+}
+
+/// Load and validate a [ConduitConfig] from a YAML file.
+pub fn load_config(path: &Path) -> Result<ConduitConfig, PipelineError> {
+    let file = fs::File::open(path)?;
+    let config: ConduitConfig =
+        serde_yaml::from_reader(file).map_err(|e| PipelineError::ConfigParse(e.to_string()))?;
+    config.validate()?;
+    Ok(config)
+}
+
+/// SQL and document mapping tables keyed by event type.
+pub type LoadedMappings = (HashMap<String, SqlMapping>, HashMap<String, DocumentMapping>);
+
+/// Load SQL and document mappings from `<mappings_dir>/sql` and `<mappings_dir>/document`.
+pub fn load_mappings(mappings_dir: &Path) -> Result<LoadedMappings, PipelineError> {
+    let sql = load_sql_mappings(mappings_dir.join("sql")).map_err(PipelineError::Mapping)?;
+    let doc =
+        load_document_mappings(mappings_dir.join("document")).map_err(PipelineError::Mapping)?;
+    Ok((sql, doc))
+}
+
+/// Load a single [Event] from a JSON file.
+pub fn load_event(path: &Path) -> Result<Event, PipelineError> {
+    let raw = fs::read_to_string(path)?;
+    serde_json::from_str(&raw).map_err(|e| PipelineError::EventParse(e.to_string()))
+}
+
+/// A fully loaded and cross-validated project: config, mappings, and routing rules.
+pub struct LoadedProject {
+    pub config: ConduitConfig,
+    pub sql_mappings: HashMap<String, SqlMapping>,
+    pub doc_mappings: HashMap<String, DocumentMapping>,
+    pub routing_rules: HashMap<String, Vec<AdapterId>>,
+}
+
+/// Load config, mappings, and routing, then run Phase 8 cross-validation.
+pub fn load_project(config_path: &Path, mappings_dir: &Path) -> Result<LoadedProject, PipelineError> {
+    let config = load_config(config_path)?;
+    let (sql_mappings, doc_mappings) = load_mappings(mappings_dir)?;
+    let routing_path = resolve_routing_path(config_path, &config.routing.file);
+    let routing_rules = load_routing(&routing_path).map_err(PipelineError::Routing)?;
+    validate_projection_config(&config, &routing_rules, &sql_mappings, &doc_mappings)?;
+    Ok(LoadedProject {
+        config,
+        sql_mappings,
+        doc_mappings,
+        routing_rules,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+/// Run a single event through the full pipeline (config, mappings, routing, execution).
+pub fn run(
+    config_path: &Path,
+    mappings_dir: &Path,
+    event_path: &Path,
+) -> Result<ExecutionReport, PipelineError> {
+    let project = load_project(config_path, mappings_dir)?;
+    let event = load_event(event_path)?;
+    Ok(execute_event(
+        &project.config,
+        project.sql_mappings,
+        project.doc_mappings,
+        event,
+    ))
+}
+
+/// Same as [run] but executes in [ExecutionMode::DryRun].
+pub fn dry_run(
+    config_path: &Path,
+    mappings_dir: &Path,
+    event_path: &Path,
+) -> Result<ExecutionReport, PipelineError> {
+    let project = load_project(config_path, mappings_dir)?;
+    let event = load_event(event_path)?;
+    Ok(execute_event_with_mode(
+        &project.config,
+        project.sql_mappings,
+        project.doc_mappings,
+        event,
+        ExecutionMode::DryRun,
+    ))
+}
+
+/// Result of [explain]: routing/dependency resolution for one event, without execution.
+pub struct ExplainResult {
+    pub event: Event,
+    pub routed_adapters: Vec<AdapterId>,
+    pub execution_order: Vec<AdapterId>,
+    pub execution_layers: Vec<(u32, Vec<AdapterId>)>,
+    pub depth_warning: bool,
+}
+
+/// Resolve routing and dependency order for one event without executing it.
+/// When `mappings_dir` is `Some`, also runs full Phase 8 validation.
+pub fn explain(
+    config_path: &Path,
+    event_path: &Path,
+    mappings_dir: Option<&Path>,
+) -> Result<ExplainResult, PipelineError> {
+    let config = load_config(config_path)?;
+    let event = load_event(event_path)?;
+
+    let routing_path = resolve_routing_path(config_path, &config.routing.file);
+    let rules = load_routing(&routing_path).map_err(PipelineError::Routing)?;
+    if let Some(dir) = mappings_dir {
+        let (sql, doc) = load_mappings(dir)?;
+        validate_projection_config(&config, &rules, &sql, &doc)?;
+    }
+
+    let execution_order =
+        validate_routing_and_dependencies_for_event_type(&config, &rules, &event.event_type)?;
+
+    let adapter_ids = route_with_rules(&event, &rules);
+    let routed_set: std::collections::HashSet<_> = adapter_ids.iter().cloned().collect();
+    let adapter_meta = adapter_metadata_map(&config);
+    let layer_vec = if execution_order.is_empty() {
+        Vec::new()
+    } else {
+        dependency_layers_parallel(&execution_order, &adapter_meta, &routed_set)
+    };
+    let execution_layers = if execution_order.is_empty() {
+        Vec::new()
+    } else {
+        dependency_layers_grouped(&execution_order, &layer_vec)
+    };
+    let depth_warning = dependency_depth_exceeds_recommended(&layer_vec);
+
+    Ok(ExplainResult {
+        event,
+        routed_adapters: adapter_ids,
+        execution_order,
+        execution_layers,
+        depth_warning,
+    })
+}
+
+/// Replay a directory/file of events through the full pipeline.
+pub fn replay(
+    config_path: &Path,
+    mappings_dir: &Path,
+    events_path: &Path,
+    opts: &ReplayRunOptions,
+) -> Result<ReplayReport, PipelineError> {
+    let project = load_project(config_path, mappings_dir)?;
+    let mut iter = events_from_path(events_path)?;
+    let mut ctx = ReplayContext::new(
+        &project.config,
+        project.routing_rules,
+        project.sql_mappings,
+        project.doc_mappings,
+    );
+    Ok(ctx.run_stream_with_options(&mut iter, opts)?)
+}

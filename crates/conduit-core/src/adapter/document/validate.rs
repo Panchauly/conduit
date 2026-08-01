@@ -35,13 +35,11 @@ pub fn validate_document_mappings(
 ) -> Result<(), String> {
     // Rule A: routing → mapping
     for (event, targets) in routing {
-        if targets.contains(&StorageKind::Document) {
-            if !document_mappings.contains_key(event) {
-                return Err(format!(
-                    "Routing includes Document for event '{}' but no document mapping found",
-                    event
-                ));
-            }
+        if targets.contains(&StorageKind::Document) && !document_mappings.contains_key(event) {
+            return Err(format!(
+                "Routing includes Document for event '{}' but no document mapping found",
+                event
+            ));
         }
     }
 

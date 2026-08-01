@@ -25,7 +25,7 @@ fn user_created_routes_to_sql_and_document() {
     set_test_routing();
     let event = test_event("UserCreated");
 
-    let targets = route(&event);
+    let targets = route(&event).expect("routing table loads from test fixtures");
 
     assert_eq!(
         targets,
@@ -38,7 +38,7 @@ fn cache_invalidated_routes_to_key_value() {
     set_test_routing();
     let event = test_event("CacheInvalidated");
 
-    let targets = route(&event);
+    let targets = route(&event).expect("routing table loads from test fixtures");
 
     assert_eq!(
         targets,
@@ -52,7 +52,7 @@ fn unknown_event_routes_to_document_by_default() {
     set_test_routing();
     let event = test_event("UnknownEvent");
 
-    let targets = route(&event);
+    let targets = route(&event).expect("routing table loads from test fixtures");
 
     assert!(
         targets.is_empty(),

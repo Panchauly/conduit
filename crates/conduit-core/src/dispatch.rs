@@ -37,11 +37,21 @@ pub fn dispatch(
     failure_policy: FailurePolicy,
     adapter_meta: &HashMap<AdapterId, AdapterExecutionMeta>,
 ) -> ExecutionReport {
+    let routing_rules = match crate::routing::global_routing_table() {
+        Ok(rules) => rules,
+        Err(e) => {
+            return dependency_order_failure_report(
+                event,
+                SystemTime::now(),
+                format!("global routing table unavailable: {}", e),
+            );
+        }
+    };
     dispatch_with_routing(
         event,
         adapters,
         failure_policy,
-        crate::routing::global_routing_table(),
+        routing_rules,
         adapter_meta,
     )
 }

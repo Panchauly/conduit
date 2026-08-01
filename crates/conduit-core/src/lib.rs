@@ -2,6 +2,7 @@ pub mod adapter;
 pub mod dispatch;
 pub mod event;
 pub mod execution;
+pub mod pipeline;
 pub mod replay;
 pub mod routing;
 pub mod runtime;
