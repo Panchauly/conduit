@@ -17,6 +17,7 @@ fn test_event() -> Event {
         event_type: "UserCreated".to_string(),
         payload: r#"{ "id": "u1", "email": "a@b.com" }"#.to_string(),
         metadata: HashMap::new(),
+        version: 1,
     }
 }
 
@@ -58,6 +59,7 @@ fn sql_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
 event: UserCreated
 table: users
 primary_key: id
+version: 1
 columns:
   id: payload.id
   email: payload.email

@@ -7,6 +7,7 @@ fn event_can_be_created() {
         event_type: "Test".to_string(),
         payload: "{}".to_string(),
         metadata: Default::default(),
+        version: 1,
     };
 
     assert_eq!(e.event_type, "Test");

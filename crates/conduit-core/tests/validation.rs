@@ -49,6 +49,7 @@ fn sql_uc() -> SqlMapping {
 event: UserCreated
 table: users
 primary_key: id
+version: 1
 columns:
   id: payload.id
 "#,
@@ -61,6 +62,7 @@ fn doc_uc() -> DocumentMapping {
         r#"
 event: UserCreated
 collection: users
+version: 1
 document:
   id: payload.id
 "#,
@@ -386,6 +388,44 @@ fn rejects_empty_document_template_object() {
     );
     let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
     assert!(r.to_string().contains("empty") || r.to_string().contains("{}"));
+}
+
+#[test]
+fn rejects_sql_mapping_with_zero_version() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sm = sql_uc();
+    sm.version = 0;
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sm);
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), doc_uc());
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
+    assert!(r.to_string().contains("version must be >= 1"));
+}
+
+#[test]
+fn rejects_document_mapping_with_zero_version() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sql_uc());
+    let mut dm = doc_uc();
+    dm.version = 0;
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), dm);
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
+    assert!(r.to_string().contains("version must be >= 1"));
 }
 
 #[test]

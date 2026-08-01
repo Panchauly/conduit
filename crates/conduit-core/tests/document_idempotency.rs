@@ -17,6 +17,7 @@ fn test_event() -> Event {
         event_type: "UserCreated".to_string(),
         payload: r#"{ "id": "u1", "email": "a@b.com" }"#.to_string(),
         metadata: HashMap::new(),
+        version: 1,
     }
 }
 
@@ -38,6 +39,7 @@ fn document_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
             r#"
 event: UserCreated
 collection: users
+version: 1
 document:
   id: payload.id
   email: payload.email

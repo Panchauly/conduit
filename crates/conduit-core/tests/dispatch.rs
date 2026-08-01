@@ -63,6 +63,7 @@ fn test_event(event_type: &str) -> Event {
         event_type: event_type.into(),
         payload: "{}".into(),
         metadata: HashMap::new(),
+        version: 1,
     }
 }
 

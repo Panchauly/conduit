@@ -485,6 +485,11 @@ pub fn validate_projection_config(
                 event: key.clone(),
                 reason: "columns must be non-empty".into(),
             });
+        } else if m.version < 1 {
+            report.push(ValidationIssue::InvalidSqlMapping {
+                event: key.clone(),
+                reason: "version must be >= 1".into(),
+            });
         }
     }
 
@@ -510,6 +515,11 @@ pub fn validate_projection_config(
             report.push(ValidationIssue::InvalidDocumentMapping {
                 event: key.clone(),
                 reason: "document template must not be empty (null, {}, or [])".into(),
+            });
+        } else if m.version < 1 {
+            report.push(ValidationIssue::InvalidDocumentMapping {
+                event: key.clone(),
+                reason: "version must be >= 1".into(),
             });
         }
     }

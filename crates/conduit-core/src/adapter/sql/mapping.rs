@@ -12,6 +12,9 @@ pub struct SqlMapping {
     pub event: String,
     pub table: String,
 
+    /// Target schema version this mapping projects into. Must be explicit ($\ge 1$).
+    pub version: u32,
+
     pub primary_key: String,
 
     pub columns: HashMap<String, String>,

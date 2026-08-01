@@ -427,12 +427,14 @@ mod tests {
             event_type: "T".into(),
             payload: "{}".into(),
             metadata: HashMap::new(),
+            version: 1,
         };
         let a = Event {
             event_id: "a".into(),
             event_type: "T".into(),
             payload: "{}".into(),
             metadata: HashMap::new(),
+            version: 1,
         };
         fs::write(tmp.path().join("z.json"), serde_json::to_string(&z).unwrap()).unwrap();
         fs::write(tmp.path().join("a.json"), serde_json::to_string(&a).unwrap()).unwrap();
@@ -451,12 +453,14 @@ mod tests {
             event_type: "T".into(),
             payload: "{}".into(),
             metadata: HashMap::new(),
+            version: 1,
         };
         let e2 = Event {
             event_id: "2".into(),
             event_type: "T".into(),
             payload: "{}".into(),
             metadata: HashMap::new(),
+            version: 1,
         };
         fs::write(
             &p,

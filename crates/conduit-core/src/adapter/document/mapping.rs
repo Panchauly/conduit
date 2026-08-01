@@ -9,6 +9,9 @@ pub struct DocumentMapping {
     pub event: String,
     pub collection: String,
 
+    /// Target schema version this mapping projects into. Must be explicit ($\ge 1$).
+    pub version: u32,
+
     /// JSON-like structure where leaf values are payload/metadata paths
     pub document: Value,
 

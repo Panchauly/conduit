@@ -81,6 +81,7 @@ fn execute_event_runs_without_panic() {
 event: UserCreated
 table: users
 primary_key: id
+version: 1
 columns:
   id: payload.id
 "#,
@@ -98,6 +99,7 @@ columns:
             r#"
 event: UserCreated
 collection: users
+version: 1
 document:
   id: payload.id
 "#,
@@ -113,6 +115,7 @@ document:
         event_type: "UserCreated".into(),
         payload: r#"{ "id": "u1" }"#.into(),
         metadata: Default::default(),
+        version: 1,
     };
 
     // -----------------------------
