@@ -297,7 +297,7 @@ sql → search → analytics → cache → reporting
 
 ---
 
-### Phase 10.2 — Pure-Function Upcaster Registry 🔄 (Planned)
+### Phase 10.2 — Pure-Function Upcaster Registry ✅ (Completed)
 
 **Goal:** Implement in-memory payload upcasting to transform historical event payloads ($V_k \to V_{k+1}$) before mapping projection.
 

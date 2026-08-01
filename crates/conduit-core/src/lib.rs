@@ -6,6 +6,7 @@ pub mod pipeline;
 pub mod replay;
 pub mod routing;
 pub mod runtime;
+pub mod upcast;
 
 use std::collections::HashMap;
 
@@ -28,6 +29,9 @@ pub use execution::{
     AdapterExecutionReport, AdapterOutcome, AdapterReportError, ExecutionMode, ExecutionReport,
     ExecutionStatus,
 };
+
+/// Phase 10.2 upcaster registry for schema evolution.
+pub use upcast::{Upcaster, UpcastError, UpcasterRegistry};
 
 /// Phase 7 replay API.
 pub use replay::{
