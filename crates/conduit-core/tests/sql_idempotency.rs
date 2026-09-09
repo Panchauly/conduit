@@ -2,9 +2,12 @@ use conduit_core::adapter::StorageAdapter;
 use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use conduit_core::adapter::sql::sqlite::SqliteAdapter;
 use conduit_core::event::Event;
+use conduit_core::runtime::config::MigrationPolicy;
+use conduit_core::upcast::UpcasterRegistry;
 
 use rusqlite::Connection;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tempfile::tempdir;
 
 // ------------------------------------------------------------
@@ -17,6 +20,8 @@ fn test_event() -> Event {
         event_type: "UserCreated".to_string(),
         payload: r#"{ "id": "u1", "email": "a@b.com" }"#.to_string(),
         metadata: HashMap::new(),
+        version: 1,
+        sequence: 1,
     }
 }
 
@@ -40,13 +45,8 @@ fn sql_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
             )",
             [],
         )?;
-        conn.execute(
-            "CREATE TABLE conduit_events (
-                event_id TEXT PRIMARY KEY,
-                processed_at TEXT NOT NULL
-            )",
-            [],
-        )?;
+        // conduit_projection_state (Phase 11.2 guard) is self-managed by the
+        // adapter via CREATE TABLE IF NOT EXISTS; nothing to set up here.
     }
 
     // Minimal SQL mapping
@@ -58,6 +58,7 @@ fn sql_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
 event: UserCreated
 table: users
 primary_key: id
+version: 1
 columns:
   id: payload.id
   email: payload.email
@@ -72,6 +73,8 @@ columns:
         db_path.to_string_lossy().to_string(),
         10,
         builder,
+        Arc::new(UpcasterRegistry::new()),
+        MigrationPolicy::default(),
     );
 
     let event = test_event();

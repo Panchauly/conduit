@@ -113,7 +113,9 @@ pub fn execution_order_for_routed(
         order.push(k.id.clone());
         if let Some(succs) = successors.get(&k.id) {
             for s in succs {
-                let Some(deg) = in_degree.get_mut(s) else { continue };
+                let Some(deg) = in_degree.get_mut(s) else {
+                    continue;
+                };
                 *deg -= 1;
                 if *deg == 0 {
                     let p = meta.get(s).map(|m| m.priority).unwrap_or(u32::MAX);
@@ -163,10 +165,7 @@ pub fn dependency_layers_parallel(
     let mut id_to_layer: HashMap<&str, u32> = HashMap::new();
     let mut layers = Vec::with_capacity(execution_order.len());
     for id in execution_order {
-        let deps = meta
-            .get(id)
-            .map(|m| m.depends_on.as_slice())
-            .unwrap_or(&[]);
+        let deps = meta.get(id).map(|m| m.depends_on.as_slice()).unwrap_or(&[]);
         let mut layer = 0u32;
         for d in deps {
             if routed.contains(d) {
@@ -310,12 +309,9 @@ mod tests {
 
     #[test]
     fn layers_diamond() {
-        let meta = meta_map(&[
-            ("A", 10, &[]),
-            ("B", 10, &[]),
-            ("C", 10, &["A", "B"]),
-        ]);
-        let order = execution_order_for_routed(&["A".into(), "B".into(), "C".into()], &meta).unwrap();
+        let meta = meta_map(&[("A", 10, &[]), ("B", 10, &[]), ("C", 10, &["A", "B"])]);
+        let order =
+            execution_order_for_routed(&["A".into(), "B".into(), "C".into()], &meta).unwrap();
         let r = routed_set(&["A", "B", "C"]);
         let layers = dependency_layers_parallel(&order, &meta, &r);
         assert_eq!(layers, vec![0, 0, 1]);
@@ -329,11 +325,9 @@ mod tests {
             ("C", 10, &["B"]),
             ("D", 10, &["C"]),
         ]);
-        let order = execution_order_for_routed(
-            &["A".into(), "B".into(), "C".into(), "D".into()],
-            &meta,
-        )
-        .unwrap();
+        let order =
+            execution_order_for_routed(&["A".into(), "B".into(), "C".into(), "D".into()], &meta)
+                .unwrap();
         let r = routed_set(&["A", "B", "C", "D"]);
         let layers = dependency_layers_parallel(&order, &meta, &r);
         assert_eq!(layers, vec![0, 1, 2, 3]);

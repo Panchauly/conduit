@@ -66,6 +66,7 @@ fn execute_event_runs_without_panic() {
             }),
         ],
         failure_policy: FailurePolicy::FailFast,
+        migration_policy: Default::default(),
     };
 
     config.validate().expect("config must be valid");
@@ -81,6 +82,7 @@ fn execute_event_runs_without_panic() {
 event: UserCreated
 table: users
 primary_key: id
+version: 1
 columns:
   id: payload.id
 "#,
@@ -98,6 +100,8 @@ columns:
             r#"
 event: UserCreated
 collection: users
+version: 1
+id: payload.id
 document:
   id: payload.id
 "#,
@@ -113,6 +117,8 @@ document:
         event_type: "UserCreated".into(),
         payload: r#"{ "id": "u1" }"#.into(),
         metadata: Default::default(),
+        version: 1,
+        sequence: 1,
     };
 
     // -----------------------------

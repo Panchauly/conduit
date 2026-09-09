@@ -1,10 +1,10 @@
+use conduit_core::AdapterExecutionMeta;
 use conduit_core::adapter::{AdapterError, AdapterResult, StorageAdapter};
 use conduit_core::dispatch::dispatch;
 use conduit_core::event::Event;
 use conduit_core::execution::{AdapterOutcome, ExecutionStatus};
-use conduit_core::routing::{route, AdapterId, StorageKind};
+use conduit_core::routing::{AdapterId, StorageKind, route};
 use conduit_core::runtime::config::FailurePolicy;
-use conduit_core::AdapterExecutionMeta;
 
 use std::collections::HashMap;
 
@@ -32,15 +32,15 @@ impl StorageAdapter for TestAdapter {
     }
 
     fn handle(&self, _event: &Event) -> AdapterResult {
-        AdapterResult {
-            adapter_id: self.id.to_string(), // 🔴 THIS MUST MATCH routing.json
-            kind: self.kind,
-            success: self.succeed,
-            error: if self.succeed {
-                None
-            } else {
-                Some(AdapterError::WriteFailed("forced failure".to_string()))
-            },
+        // adapter_id 🔴 THIS MUST MATCH routing.json
+        if self.succeed {
+            AdapterResult::success(self.id.to_string(), self.kind)
+        } else {
+            AdapterResult::failure(
+                self.id.to_string(),
+                self.kind,
+                AdapterError::WriteFailed("forced failure".to_string()),
+            )
         }
     }
 }
@@ -63,6 +63,8 @@ fn test_event(event_type: &str) -> Event {
         event_type: event_type.into(),
         payload: "{}".into(),
         metadata: HashMap::new(),
+        version: 1,
+        sequence: 1,
     }
 }
 
@@ -117,12 +119,7 @@ fn dispatch_executes_all_targeted_adapters() {
     ];
 
     let meta = fixture_adapter_meta();
-    let report = dispatch(
-        &event,
-        &mut adapters,
-        FailurePolicy::FailFast,
-        &meta,
-    );
+    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
 
     assert_eq!(report.adapter_reports.len(), 2);
     assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
@@ -159,12 +156,7 @@ fn dispatch_stops_on_adapter_failure() {
     ];
 
     let meta = fixture_adapter_meta();
-    let report = dispatch(
-        &event,
-        &mut adapters,
-        FailurePolicy::FailFast,
-        &meta,
-    );
+    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
 
     assert_eq!(report.adapter_reports.len(), 1);
     assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
@@ -195,15 +187,13 @@ fn dispatch_continue_on_error_runs_all_adapters() {
     ];
 
     let meta = fixture_adapter_meta();
-    let report = dispatch(
-        &event,
-        &mut adapters,
-        FailurePolicy::ContinueOnError,
-        &meta,
-    );
+    let report = dispatch(&event, &mut adapters, FailurePolicy::ContinueOnError, &meta);
 
     assert_eq!(report.adapter_reports.len(), 2);
-    assert_eq!(report.adapter_reports[0].outcome, AdapterOutcome::WriteFailed);
+    assert_eq!(
+        report.adapter_reports[0].outcome,
+        AdapterOutcome::WriteFailed
+    );
     assert_eq!(report.adapter_reports[1].outcome, AdapterOutcome::Succeeded);
     assert_eq!(report.status, ExecutionStatus::Failed);
 }
@@ -233,12 +223,7 @@ fn dispatch_only_runs_routed_adapters() {
     ];
 
     let meta = fixture_adapter_meta();
-    let report = dispatch(
-        &event,
-        &mut adapters,
-        FailurePolicy::FailFast,
-        &meta,
-    );
+    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
 
     // routing.json selects only Sql + Document
     assert_eq!(report.adapter_reports.len(), 2);
@@ -274,12 +259,7 @@ fn dispatch_runs_dependency_before_dependent() {
             depends_on: vec!["sql-primary".into()],
         },
     );
-    let report = dispatch(
-        &event,
-        &mut adapters,
-        FailurePolicy::FailFast,
-        &meta,
-    );
+    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
     assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
     assert_eq!(report.adapter_reports[1].adapter_id, "doc-readmodel");
 }
@@ -315,17 +295,14 @@ fn dispatch_cycle_yields_failed_report_not_panic() {
             depends_on: vec!["sql-primary".into()],
         },
     );
-    let report = dispatch(
-        &event,
-        &mut adapters,
-        FailurePolicy::FailFast,
-        &meta,
-    );
+    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
     assert_eq!(report.status, ExecutionStatus::Failed);
     assert_eq!(report.adapter_reports.len(), 1);
     assert_eq!(report.adapter_reports[0].adapter_id, "_dispatch");
-    assert!(report.adapter_reports[0]
-        .error
-        .as_ref()
-        .is_some_and(|e| format!("{:?}", e).contains("cyclic")));
+    assert!(
+        report.adapter_reports[0]
+            .error
+            .as_ref()
+            .is_some_and(|e| format!("{:?}", e).contains("cyclic"))
+    );
 }

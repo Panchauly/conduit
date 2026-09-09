@@ -3,21 +3,62 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use super::adapter::SqlError;
+use crate::adapter::is_identity_scalar;
 use crate::event::Event;
 use crate::runtime::config::AdapterCapability;
 use serde_json::Value;
+
+/// One value, or several in declared order — used for `primary_key` (Phase
+/// 11.1), which is a single column name for most tables and a list of column
+/// names for tables whose real identity is composite (bridge/junction tables,
+/// many-to-many association tables).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum OneOrMany<T> {
+    One(T),
+    Many(Vec<T>),
+}
+
+impl<T> OneOrMany<T> {
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        match self {
+            OneOrMany::One(v) => std::slice::from_ref(v).iter(),
+            OneOrMany::Many(v) => v.iter(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            OneOrMany::One(_) => 1,
+            OneOrMany::Many(v) => v.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl From<&str> for OneOrMany<String> {
+    fn from(s: &str) -> Self {
+        OneOrMany::One(s.to_string())
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SqlMapping {
     pub event: String,
     pub table: String,
 
-    pub primary_key: String,
+    /// Target schema version this mapping projects into. Must be explicit ($\ge 1$).
+    pub version: u32,
+
+    /// Column name (single-column identity), or a list of column names for a
+    /// composite key (Phase 11.1). Every listed column must also appear in
+    /// `columns`.
+    pub primary_key: OneOrMany<String>,
 
     pub columns: HashMap<String, String>,
-
-    #[serde(default)]
-    pub foreign_keys: HashMap<String, String>,
 
     /// Capabilities adapters must provide to run this projection (enum; parse-time validated).
     #[serde(default)]
@@ -25,7 +66,13 @@ pub struct SqlMapping {
 }
 
 impl SqlMapping {
-    pub fn build(&self, event: &Event) -> Result<(String, Vec<Value>), SqlError> {
+    /// Build the INSERT statement and its bound values, plus the resolved
+    /// entity identity (Phase 11.1) — the `primary_key` column(s)' value(s),
+    /// in declared `primary_key` order, read off the same resolution pass
+    /// that builds `columns` so they can never drift from what is actually
+    /// inserted. Each key value must be a JSON scalar (string/number/bool);
+    /// an object/array/null fails the build rather than reach the guard key.
+    pub fn build(&self, event: &Event) -> Result<(String, Vec<Value>, Vec<Value>), SqlError> {
         // Parse payload JSON
         let payload: Value = serde_json::from_str(&event.payload)
             .map_err(|e| SqlError::BuildFailed(format!("invalid payload JSON: {}", e)))?;
@@ -41,12 +88,38 @@ impl SqlMapping {
 
         let mut columns = Vec::with_capacity(column_pairs.len());
         let mut values = Vec::with_capacity(column_pairs.len());
+        let mut resolved_by_column: HashMap<&str, Value> =
+            HashMap::with_capacity(column_pairs.len());
 
         for (column, path_expr) in column_pairs {
             let value = self.resolve_path(path_expr, payload_obj, &event.metadata)?;
 
+            resolved_by_column.insert(column.as_str(), value.clone());
             columns.push(column.clone());
             values.push(value);
+        }
+
+        let mut key_values = Vec::with_capacity(self.primary_key.len());
+        for key_column in self.primary_key.iter() {
+            let value = resolved_by_column
+                .get(key_column.as_str())
+                .cloned()
+                .ok_or_else(|| {
+                    SqlError::BuildFailed(format!(
+                        "primary key column '{}' not present in mapping columns",
+                        key_column
+                    ))
+                })?;
+
+            if !is_identity_scalar(&value) {
+                return Err(SqlError::BuildFailed(format!(
+                    "primary key column '{}' resolved to a non-scalar value; \
+                     entity identity must be a string, number, or bool",
+                    key_column
+                )));
+            }
+
+            key_values.push(value);
         }
 
         let placeholders = vec!["?"; columns.len()].join(", ");
@@ -58,7 +131,7 @@ impl SqlMapping {
             placeholders
         );
 
-        Ok((sql, values))
+        Ok((sql, values, key_values))
     }
 
     fn resolve_path(
@@ -68,9 +141,10 @@ impl SqlMapping {
         metadata: &HashMap<String, String>,
     ) -> Result<Value, SqlError> {
         if let Some(rest) = path.strip_prefix("payload.") {
-            payload.get(rest).cloned().ok_or_else(|| {
-                SqlError::BuildFailed(format!("payload field '{}' not found", rest))
-            })
+            payload
+                .get(rest)
+                .cloned()
+                .ok_or_else(|| SqlError::BuildFailed(format!("payload field '{}' not found", rest)))
         } else if let Some(rest) = path.strip_prefix("metadata.") {
             metadata
                 .get(rest)
@@ -84,5 +158,74 @@ impl SqlMapping {
                 path
             )))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mapping_with_primary_key(yaml_primary_key: &str) -> SqlMapping {
+        serde_yaml::from_str(&format!(
+            r#"
+event: UserCreated
+table: users
+version: 1
+primary_key: {}
+columns:
+  id: payload.id
+  email: payload.email
+"#,
+            yaml_primary_key
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn scalar_primary_key_deserializes_as_one() {
+        let m = mapping_with_primary_key("id");
+        assert_eq!(m.primary_key.iter().collect::<Vec<_>>(), vec!["id"]);
+    }
+
+    #[test]
+    fn list_primary_key_deserializes_as_many() {
+        let m = mapping_with_primary_key("[id, email]");
+        assert_eq!(
+            m.primary_key.iter().collect::<Vec<_>>(),
+            vec!["id", "email"]
+        );
+    }
+
+    #[test]
+    fn build_resolves_composite_key_in_declared_order() {
+        let m = mapping_with_primary_key("[email, id]"); // declared order differs from column sort order
+        let event = Event {
+            event_id: "e1".into(),
+            event_type: "UserCreated".into(),
+            payload: r#"{ "id": "u1", "email": "a@b.com" }"#.into(),
+            metadata: HashMap::new(),
+            version: 1,
+            sequence: 1,
+        };
+        let (_, _, key_values) = m.build(&event).unwrap();
+        assert_eq!(
+            key_values,
+            vec![Value::String("a@b.com".into()), Value::String("u1".into())]
+        );
+    }
+
+    #[test]
+    fn build_rejects_non_scalar_primary_key_value() {
+        let m = mapping_with_primary_key("id");
+        let event = Event {
+            event_id: "e1".into(),
+            event_type: "UserCreated".into(),
+            payload: r#"{ "id": ["not", "scalar"], "email": "a@b.com" }"#.into(),
+            metadata: HashMap::new(),
+            version: 1,
+            sequence: 1,
+        };
+        let err = m.build(&event).unwrap_err();
+        assert!(err.to_string().contains("non-scalar"));
     }
 }

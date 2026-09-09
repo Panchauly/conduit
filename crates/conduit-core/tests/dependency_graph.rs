@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use conduit_core::runtime::dependency_graph::DependencyOrderError;
-use conduit_core::{execution_order_for_routed, AdapterExecutionMeta};
+use conduit_core::{AdapterExecutionMeta, execution_order_for_routed};
 
 fn meta_map(entries: &[(&str, u32, &[&str])]) -> HashMap<String, AdapterExecutionMeta> {
     entries

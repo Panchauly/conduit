@@ -15,10 +15,10 @@ use crate::event::Event;
 use crate::execution::{
     AdapterExecutionReport, AdapterReportError, ExecutionReport, ExecutionStatus,
 };
-use crate::routing::{route_with_rules, AdapterId, StorageKind};
+use crate::routing::{AdapterId, StorageKind, route_with_rules};
 use crate::runtime::build_adapters_from_config;
 use crate::runtime::config::{ConduitConfig, FailurePolicy};
-use crate::runtime::dependency_graph::{adapter_metadata_map, AdapterExecutionMeta};
+use crate::runtime::dependency_graph::{AdapterExecutionMeta, adapter_metadata_map};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -76,10 +76,7 @@ pub fn events_from_path(path: impl AsRef<Path>) -> Result<EventsFromPath, Replay
             })
             .collect();
         paths.sort();
-        Ok(EventsFromPath::Directory {
-            paths,
-            index: 0,
-        })
+        Ok(EventsFromPath::Directory { paths, index: 0 })
     } else {
         let raw = fs::read_to_string(path)?;
         let trimmed = raw.trim();
@@ -264,18 +261,15 @@ fn unrouted_event_report(event: &Event) -> ExecutionReport {
         event.event_type.clone(),
         trace_id,
         now,
-    );
-    let adapter_report = AdapterExecutionReport::new(
-        "routing".to_string(),
-        StorageKind::Sql,
-        now,
     )
-    .finish_failure(
-        now,
-        AdapterReportError::WriteFailed {
-            message: format!("no routing rule for event_type {:?}", event.event_type),
-        },
-    );
+    .with_source_version(event.version());
+    let adapter_report = AdapterExecutionReport::new("routing".to_string(), StorageKind::Sql, now)
+        .finish_failure(
+            now,
+            AdapterReportError::WriteFailed {
+                message: format!("no routing rule for event_type {:?}", event.event_type),
+            },
+        );
     report.push_adapter_report(adapter_report);
     report.finish(now)
 }
@@ -293,14 +287,38 @@ pub struct ReplayContext {
 
 impl ReplayContext {
     /// Build adapters once (multiple SQL or file adapters each get a clone of the mapping bundle).
+    /// Runs with an empty [crate::upcast::UpcasterRegistry]; use [ReplayContext::new_with_upcasters]
+    /// to replay mixed-version streams through registered upcasters (Phase 10.3/10.4).
     pub fn new(
         config: &ConduitConfig,
         routing_rules: HashMap<String, Vec<AdapterId>>,
         sql_mappings: HashMap<String, SqlMapping>,
         document_mappings: HashMap<String, DocumentMapping>,
     ) -> Self {
+        Self::new_with_upcasters(
+            config,
+            routing_rules,
+            sql_mappings,
+            document_mappings,
+            std::sync::Arc::new(crate::upcast::UpcasterRegistry::new()),
+        )
+    }
+
+    /// Same as [ReplayContext::new], with an explicit [crate::upcast::UpcasterRegistry].
+    pub fn new_with_upcasters(
+        config: &ConduitConfig,
+        routing_rules: HashMap<String, Vec<AdapterId>>,
+        sql_mappings: HashMap<String, SqlMapping>,
+        document_mappings: HashMap<String, DocumentMapping>,
+        upcasters: std::sync::Arc<crate::upcast::UpcasterRegistry>,
+    ) -> Self {
         Self {
-            adapters: build_adapters_from_config(config, sql_mappings, document_mappings),
+            adapters: build_adapters_from_config(
+                config,
+                sql_mappings,
+                document_mappings,
+                upcasters,
+            ),
             failure_policy: config.failure_policy,
             routing_rules,
             adapter_meta: adapter_metadata_map(config),
@@ -352,8 +370,7 @@ impl ReplayContext {
                 }
             }
 
-            let record_summary =
-                !succeeded || cap.is_none_or(|c| report.per_event.len() < c);
+            let record_summary = !succeeded || cap.is_none_or(|c| report.per_event.len() < c);
             if record_summary {
                 report.per_event.push(PerEventReplaySummary {
                     event_id: event.event_id,
@@ -427,15 +444,27 @@ mod tests {
             event_type: "T".into(),
             payload: "{}".into(),
             metadata: HashMap::new(),
+            version: 1,
+            sequence: 1,
         };
         let a = Event {
             event_id: "a".into(),
             event_type: "T".into(),
             payload: "{}".into(),
             metadata: HashMap::new(),
+            version: 1,
+            sequence: 1,
         };
-        fs::write(tmp.path().join("z.json"), serde_json::to_string(&z).unwrap()).unwrap();
-        fs::write(tmp.path().join("a.json"), serde_json::to_string(&a).unwrap()).unwrap();
+        fs::write(
+            tmp.path().join("z.json"),
+            serde_json::to_string(&z).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("a.json"),
+            serde_json::to_string(&a).unwrap(),
+        )
+        .unwrap();
         let mut it = events_from_path(tmp.path()).unwrap();
         assert_eq!(it.next().unwrap().unwrap().event_id, "a");
         assert_eq!(it.next().unwrap().unwrap().event_id, "z");
@@ -451,12 +480,16 @@ mod tests {
             event_type: "T".into(),
             payload: "{}".into(),
             metadata: HashMap::new(),
+            version: 1,
+            sequence: 1,
         };
         let e2 = Event {
             event_id: "2".into(),
             event_type: "T".into(),
             payload: "{}".into(),
             metadata: HashMap::new(),
+            version: 1,
+            sequence: 1,
         };
         fs::write(
             &p,

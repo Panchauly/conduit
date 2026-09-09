@@ -1,4 +1,5 @@
 use super::adapter::DocumentError;
+use crate::adapter::{is_identity_scalar, json_scalar_to_string};
 use crate::event::Event;
 use crate::runtime::config::AdapterCapability;
 use serde::Deserialize;
@@ -9,6 +10,15 @@ pub struct DocumentMapping {
     pub event: String,
     pub collection: String,
 
+    /// Target schema version this mapping projects into. Must be explicit ($\ge 1$).
+    pub version: u32,
+
+    /// Path expression (`payload.` / `metadata.`, same syntax as `document` leaves)
+    /// resolving this event's entity identity (Phase 11.1). Keys the idempotency
+    /// guard and the output filename, so a redelivered creation event with a new
+    /// `event_id` for the same entity is skipped, not silently duplicated.
+    pub id: String,
+
     /// JSON-like structure where leaf values are payload/metadata paths
     pub document: Value,
 
@@ -18,8 +28,9 @@ pub struct DocumentMapping {
 }
 
 impl DocumentMapping {
-    /// Build document JSON from event payload + metadata
-    pub fn apply(&self, event: &Event) -> Result<Value, DocumentError> {
+    /// Build document JSON from event payload + metadata, plus the resolved
+    /// entity identity (Phase 11.1), canonicalized to a string.
+    pub fn apply(&self, event: &Event) -> Result<(Value, String), DocumentError> {
         // Parse payload JSON
         let payload: Value = serde_json::from_str(&event.payload)
             .map_err(|e| DocumentError::BuildFailed(format!("invalid payload JSON: {}", e)))?;
@@ -29,7 +40,20 @@ impl DocumentMapping {
             .ok_or_else(|| DocumentError::BuildFailed("payload must be a JSON object".into()))?;
 
         // Expand template recursively
-        self.expand_value(&self.document, payload_obj, &event.metadata)
+        let document = self.expand_value(&self.document, payload_obj, &event.metadata)?;
+        let id_value = self.resolve_path(&self.id, payload_obj, &event.metadata)?;
+
+        // Phase 11.1: an identity must be a JSON scalar — an object/array/null
+        // means `id` points at the wrong place; fail the build, don't let a
+        // JSON blob (or "") reach the guard key / output filename.
+        if !is_identity_scalar(&id_value) {
+            return Err(DocumentError::BuildFailed(format!(
+                "id path '{}' resolved to a non-scalar value; entity identity must be a string, number, or bool",
+                self.id
+            )));
+        }
+
+        Ok((document, json_scalar_to_string(&id_value)))
     }
 
     fn expand_value(

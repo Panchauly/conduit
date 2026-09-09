@@ -2,13 +2,13 @@
 
 use conduit_core::adapter::document::mapping::DocumentMapping;
 use conduit_core::adapter::sql::mapping::SqlMapping;
-use conduit_core::{
-    validate_projection_config, validate_routing_and_dependencies_for_event_type,
-    validate_routing_for_event_type, ValidationIssue, ValidationReport,
-};
 use conduit_core::runtime::config::{
     AdapterCapability, AdapterConfig, ConduitConfig, FileAdapterConfig, FileConfig, RoutingConfig,
     SqliteAdapterConfig, SqliteConfig,
+};
+use conduit_core::{
+    ValidationIssue, ValidationReport, validate_projection_config,
+    validate_routing_and_dependencies_for_event_type, validate_routing_for_event_type,
 };
 
 use std::collections::HashMap;
@@ -40,6 +40,7 @@ fn base_config() -> ConduitConfig {
             }),
         ],
         failure_policy: Default::default(),
+        migration_policy: Default::default(),
     }
 }
 
@@ -49,6 +50,7 @@ fn sql_uc() -> SqlMapping {
 event: UserCreated
 table: users
 primary_key: id
+version: 1
 columns:
   id: payload.id
 "#,
@@ -61,6 +63,8 @@ fn doc_uc() -> DocumentMapping {
         r#"
 event: UserCreated
 collection: users
+version: 1
+id: payload.id
 document:
   id: payload.id
 "#,
@@ -77,10 +81,7 @@ fn validate_routing_for_event_ignores_unrelated_routes() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    routing.insert(
-        "CacheInvalidated".to_string(),
-        vec!["kv-cache".into()],
-    );
+    routing.insert("CacheInvalidated".to_string(), vec!["kv-cache".into()]);
     validate_routing_for_event_type(&config, &routing, "UserCreated").unwrap();
 }
 
@@ -159,7 +160,10 @@ fn rejects_capability_mismatch() {
 fn accepts_idempotent_when_adapter_declares_it() {
     let mut config = base_config();
     if let AdapterConfig::Sqlite(ref mut s) = config.adapters[0] {
-        s.capabilities = Some(vec![AdapterCapability::Write, AdapterCapability::Idempotent]);
+        s.capabilities = Some(vec![
+            AdapterCapability::Write,
+            AdapterCapability::Idempotent,
+        ]);
     }
     config.validate().unwrap();
     let mut sm = sql_uc();
@@ -227,6 +231,7 @@ fn rejects_sql_mapping_when_route_has_only_file_adapters() {
             depends_on: vec![],
         })],
         failure_policy: Default::default(),
+        migration_policy: Default::default(),
     };
     config.validate().unwrap();
     let mut sql = HashMap::new();
@@ -260,6 +265,7 @@ fn rejects_document_mapping_without_file_on_route() {
             depends_on: vec![],
         })],
         failure_policy: Default::default(),
+        migration_policy: Default::default(),
     };
     config.validate().unwrap();
     let mut sql = HashMap::new();
@@ -355,6 +361,7 @@ fn rejects_duplicate_adapter_ids_in_config() {
             }),
         ],
         failure_policy: Default::default(),
+        migration_policy: Default::default(),
     };
     let mut sql = HashMap::new();
     sql.insert("UserCreated".to_string(), sql_uc());
@@ -386,6 +393,44 @@ fn rejects_empty_document_template_object() {
     );
     let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
     assert!(r.to_string().contains("empty") || r.to_string().contains("{}"));
+}
+
+#[test]
+fn rejects_sql_mapping_with_zero_version() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sm = sql_uc();
+    sm.version = 0;
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sm);
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), doc_uc());
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
+    assert!(r.to_string().contains("version must be >= 1"));
+}
+
+#[test]
+fn rejects_document_mapping_with_zero_version() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sql_uc());
+    let mut dm = doc_uc();
+    dm.version = 0;
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), dm);
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
+    assert!(r.to_string().contains("version must be >= 1"));
 }
 
 #[test]
@@ -449,8 +494,7 @@ fn validate_routing_and_dependencies_returns_execution_order() {
         vec!["doc-readmodel".into(), "sql-primary".into()],
     );
     let order =
-        validate_routing_and_dependencies_for_event_type(&config, &routing, "UserCreated")
-            .unwrap();
+        validate_routing_and_dependencies_for_event_type(&config, &routing, "UserCreated").unwrap();
     assert_eq!(order, vec!["sql-primary", "doc-readmodel"]);
 }
 
@@ -472,4 +516,88 @@ fn config_rejects_unknown_dependency() {
     }
     let e = config.validate().unwrap_err();
     assert!(e.to_string().contains("ghost") || e.to_string().contains("unknown"));
+}
+
+// ------------------------------------------------------------
+// Phase 11.1: entity identity resolution — validated at startup.
+// ------------------------------------------------------------
+
+#[test]
+fn rejects_sql_primary_key_not_in_columns() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sm = sql_uc();
+    sm.primary_key = "ghost_pk".into();
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sm);
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), doc_uc());
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
+    assert!(r.to_string().contains("ghost_pk"));
+    assert!(r.to_string().contains("not found in columns"));
+}
+
+#[test]
+fn rejects_document_mapping_with_empty_id() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sql_uc());
+    let mut dm = doc_uc();
+    dm.id = "".into();
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), dm);
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
+    assert!(r.to_string().contains("empty id"));
+}
+
+#[test]
+fn rejects_sql_composite_primary_key_with_one_missing_column() {
+    use conduit_core::adapter::sql::mapping::OneOrMany;
+
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sm = sql_uc();
+    sm.primary_key = OneOrMany::Many(vec!["id".into(), "ghost_col".into()]);
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sm);
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), doc_uc());
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
+    assert!(r.to_string().contains("ghost_col"));
+    assert!(r.to_string().contains("not found in columns"));
+}
+
+#[test]
+fn rejects_document_mapping_with_id_not_a_payload_or_metadata_path() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sql_uc());
+    let mut dm = doc_uc();
+    dm.id = "id".into();
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), dm);
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    let r = validate_projection_config(&config, &routing, &sql, &doc).unwrap_err();
+    assert!(r.to_string().contains("'payload.' or 'metadata.' path"));
 }

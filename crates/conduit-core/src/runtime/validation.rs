@@ -8,7 +8,7 @@ use crate::adapter::sql::mapping::SqlMapping;
 use crate::routing::AdapterId;
 use crate::runtime::config::{AdapterCapability, AdapterConfig, ConduitConfig};
 use crate::runtime::dependency_graph::{
-    adapter_metadata_map, execution_order_for_routed, AdapterExecutionMeta, DependencyOrderError,
+    AdapterExecutionMeta, DependencyOrderError, adapter_metadata_map, execution_order_for_routed,
 };
 
 // ---------------------------------------------------------------------------
@@ -91,7 +91,11 @@ impl fmt::Display for ValidationIssue {
                 write!(f, "invalid SQL mapping for event {:?}: {}", event, reason)
             }
             ValidationIssue::InvalidDocumentMapping { event, reason } => {
-                write!(f, "invalid document mapping for event {:?}: {}", event, reason)
+                write!(
+                    f,
+                    "invalid document mapping for event {:?}: {}",
+                    event, reason
+                )
             }
             ValidationIssue::UnknownAdapter {
                 event_type,
@@ -152,11 +156,7 @@ impl fmt::Display for ValidationIssue {
                 )
             }
             ValidationIssue::UnroutedDocumentMapping { event } => {
-                write!(
-                    f,
-                    "document mapping for event {:?} is never routed",
-                    event
-                )
+                write!(f, "document mapping for event {:?} is never routed", event)
             }
             ValidationIssue::DocumentMappingNoFileTarget { event } => {
                 write!(
@@ -187,11 +187,7 @@ impl fmt::Display for ValidationIssue {
                 )
             }
             ValidationIssue::DuplicateAdapterId { adapter_id } => {
-                write!(
-                    f,
-                    "config: duplicate adapter id {:?}",
-                    adapter_id
-                )
+                write!(f, "config: duplicate adapter id {:?}", adapter_id)
             }
             ValidationIssue::DependencyNotOnRoute {
                 event_type,
@@ -241,11 +237,7 @@ impl ValidationReport {
     }
 
     pub fn into_result(self) -> Result<(), Self> {
-        if self.is_empty() {
-            Ok(())
-        } else {
-            Err(self)
-        }
+        if self.is_empty() { Ok(()) } else { Err(self) }
     }
 }
 
@@ -316,7 +308,9 @@ fn effective_capabilities(adapter: &AdapterConfig) -> HashSet<AdapterCapability>
 }
 
 fn document_template_empty(doc: &serde_json::Value) -> bool {
-    doc.is_null() || doc.as_object().is_some_and(|o| o.is_empty()) || doc.as_array().is_some_and(|a| a.is_empty())
+    doc.is_null()
+        || doc.as_object().is_some_and(|o| o.is_empty())
+        || doc.as_array().is_some_and(|a| a.is_empty())
 }
 
 fn validate_route_dependencies(
@@ -475,15 +469,32 @@ pub fn validate_projection_config(
                 event: key.clone(),
                 reason: "empty table".into(),
             });
-        } else if m.primary_key.trim().is_empty() {
+        } else if m.primary_key.is_empty() || m.primary_key.iter().any(|c| c.trim().is_empty()) {
             report.push(ValidationIssue::InvalidSqlMapping {
                 event: key.clone(),
-                reason: "empty primary_key".into(),
+                reason: "primary_key must list at least one non-empty column name".into(),
             });
         } else if m.columns.is_empty() {
             report.push(ValidationIssue::InvalidSqlMapping {
                 event: key.clone(),
                 reason: "columns must be non-empty".into(),
+            });
+        } else if let Some(missing) = m
+            .primary_key
+            .iter()
+            .find(|c| !m.columns.contains_key(c.as_str()))
+        {
+            // Phase 11.1: `build()` resolves entity identity off these column(s)
+            // (composite keys included); catch a stale/misspelled primary_key
+            // at startup, not mid-run.
+            report.push(ValidationIssue::InvalidSqlMapping {
+                event: key.clone(),
+                reason: format!("primary_key column '{}' not found in columns", missing),
+            });
+        } else if m.version < 1 {
+            report.push(ValidationIssue::InvalidSqlMapping {
+                event: key.clone(),
+                reason: "version must be >= 1".into(),
             });
         }
     }
@@ -510,6 +521,23 @@ pub fn validate_projection_config(
             report.push(ValidationIssue::InvalidDocumentMapping {
                 event: key.clone(),
                 reason: "document template must not be empty (null, {}, or [])".into(),
+            });
+        } else if m.id.trim().is_empty() {
+            report.push(ValidationIssue::InvalidDocumentMapping {
+                event: key.clone(),
+                reason: "empty id".into(),
+            });
+        } else if !(m.id.starts_with("payload.") || m.id.starts_with("metadata.")) {
+            // Phase 11.1: `id` is resolved the same way as a `document` leaf;
+            // catch a malformed entity-identity path at startup, not mid-run.
+            report.push(ValidationIssue::InvalidDocumentMapping {
+                event: key.clone(),
+                reason: format!("id {:?} must be a 'payload.' or 'metadata.' path", m.id),
+            });
+        } else if m.version < 1 {
+            report.push(ValidationIssue::InvalidDocumentMapping {
+                event: key.clone(),
+                reason: "version must be >= 1".into(),
             });
         }
     }

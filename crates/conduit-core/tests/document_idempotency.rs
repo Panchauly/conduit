@@ -3,8 +3,11 @@ use conduit_core::adapter::document::file::FileDocumentAdapter;
 use conduit_core::adapter::document::mapping::DocumentMapping;
 use conduit_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use conduit_core::event::Event;
+use conduit_core::runtime::config::MigrationPolicy;
+use conduit_core::upcast::UpcasterRegistry;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use tempfile::tempdir;
 
 // ------------------------------------------------------------
@@ -17,6 +20,8 @@ fn test_event() -> Event {
         event_type: "UserCreated".to_string(),
         payload: r#"{ "id": "u1", "email": "a@b.com" }"#.to_string(),
         metadata: HashMap::new(),
+        version: 1,
+        sequence: 1,
     }
 }
 
@@ -38,6 +43,8 @@ fn document_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
             r#"
 event: UserCreated
 collection: users
+version: 1
+id: payload.id
 document:
   id: payload.id
   email: payload.email
@@ -47,7 +54,14 @@ document:
 
     let builder = DocumentRuntimeBuilder::new(doc_mappings);
 
-    let adapter = FileDocumentAdapter::new("file".to_string(), root.to_path_buf(), 10, builder);
+    let adapter = FileDocumentAdapter::new(
+        "file".to_string(),
+        root.to_path_buf(),
+        10,
+        builder,
+        Arc::new(UpcasterRegistry::new()),
+        MigrationPolicy::default(),
+    );
 
     let event = test_event();
 
@@ -61,13 +75,17 @@ document:
     let r2 = adapter.handle(&event);
     assert!(r2.success);
 
-    // Verify document exists exactly once
-    let doc_path = root.join("UserCreated").join("evt-1.json");
+    // Verify document exists exactly once, keyed by entity id (Phase 11.1/11.3)
+    let doc_path = root.join("UserCreated").join("u1.json");
 
     assert!(doc_path.exists(), "document not written");
 
-    // Verify idempotency guard exists
-    let guard_path = root.join(".conduit").join("events").join("evt-1.done");
+    // Verify idempotency guard exists, keyed by (event_type, entity_id)
+    let guard_path = root
+        .join(".conduit")
+        .join("entities")
+        .join("UserCreated")
+        .join("u1.done");
 
     assert!(guard_path.exists(), "idempotency guard missing");
 

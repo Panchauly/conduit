@@ -6,8 +6,10 @@ pub mod pipeline;
 pub mod replay;
 pub mod routing;
 pub mod runtime;
+pub mod upcast;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::{
     adapter::{document::mapping::DocumentMapping, sql::mapping::SqlMapping},
@@ -29,20 +31,23 @@ pub use execution::{
     ExecutionStatus,
 };
 
+/// Phase 10.2 upcaster registry for schema evolution.
+pub use upcast::{UpcastError, Upcaster, UpcasterRegistry};
+
 /// Phase 7 replay API.
 pub use replay::{
-    events_from_path, replay_stream, replay_stream_with_options, EventsFromPath,
-    PerEventReplaySummary, ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptions,
+    EventsFromPath, PerEventReplaySummary, ReplayContext, ReplayLoadError, ReplayReport,
+    ReplayRunOptions, events_from_path, replay_stream, replay_stream_with_options,
 };
 
 /// Phase 8 projection validation.
 pub use runtime::{
-    adapter_metadata_map, dependency_depth_exceeds_recommended, dependency_layers_grouped,
-    dependency_layers_parallel, execution_order_for_routed, max_dependency_layer,
-    validate_projection_config, validate_routing_adapter_ids,
-    validate_routing_and_dependencies_for_event_type, validate_routing_for_event_type,
-    AdapterExecutionMeta, ValidationIssue, ValidationReport,
-    PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING, RECOMMENDED_MAX_DEPENDENCY_LAYER,
+    AdapterExecutionMeta, PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING,
+    RECOMMENDED_MAX_DEPENDENCY_LAYER, ValidationIssue, ValidationReport, adapter_metadata_map,
+    dependency_depth_exceeds_recommended, dependency_layers_grouped, dependency_layers_parallel,
+    execution_order_for_routed, max_dependency_layer, validate_projection_config,
+    validate_routing_adapter_ids, validate_routing_and_dependencies_for_event_type,
+    validate_routing_for_event_type,
 };
 
 /// Execution report types (also at [crate root](crate) for convenience).
@@ -63,6 +68,11 @@ pub mod report {
 /// public API for execution — not internal, not incidental. The report is
 /// the single contract for observability and outcome.
 ///
+/// Runs with an empty [UpcasterRegistry] — events whose version doesn't match
+/// a mapping's target version are handled per `config.migration_policy` with no
+/// upcaster chain available. Use [execute_event_with_upcasters] to register
+/// upcasters for schema-evolving payloads.
+///
 /// Requirements:
 /// - `config.validate()` MUST be called before this function
 /// - call [`validate_projection_config`] at startup when config + routing + mappings are loaded (CLI does this for run/replay/dry-run)
@@ -74,14 +84,28 @@ pub fn execute_event(
     document_mappings: HashMap<String, DocumentMapping>,
     event: Event,
 ) -> ExecutionReport {
-    let mut adapters = build_adapters_from_config(config, sql_mappings, document_mappings);
-    let adapter_meta = crate::runtime::adapter_metadata_map(config);
-    dispatch(
-        &event,
-        &mut adapters,
-        config.failure_policy,
-        &adapter_meta,
+    execute_event_with_upcasters(
+        config,
+        sql_mappings,
+        document_mappings,
+        event,
+        Arc::new(UpcasterRegistry::new()),
     )
+}
+
+/// Same as [execute_event], with an explicit [UpcasterRegistry] (Phase 10.3) for
+/// projecting version-mismatched event payloads before mapping.
+pub fn execute_event_with_upcasters(
+    config: &ConduitConfig,
+    sql_mappings: HashMap<String, SqlMapping>,
+    document_mappings: HashMap<String, DocumentMapping>,
+    event: Event,
+    upcasters: Arc<UpcasterRegistry>,
+) -> ExecutionReport {
+    let mut adapters =
+        build_adapters_from_config(config, sql_mappings, document_mappings, upcasters);
+    let adapter_meta = crate::runtime::adapter_metadata_map(config);
+    dispatch(&event, &mut adapters, config.failure_policy, &adapter_meta)
 }
 
 /// Execute a single event with an explicit [ExecutionMode] (e.g. [execution::ExecutionMode::DryRun] for no-write simulation).
@@ -99,14 +123,14 @@ pub fn execute_event_with_mode(
             execute_event(config, sql_mappings, document_mappings, event)
         }
         crate::execution::ExecutionMode::DryRun => {
-            let mut adapters = build_adapters_from_config(config, sql_mappings, document_mappings);
+            let mut adapters = build_adapters_from_config(
+                config,
+                sql_mappings,
+                document_mappings,
+                Arc::new(UpcasterRegistry::new()),
+            );
             let adapter_meta = crate::runtime::adapter_metadata_map(config);
-            dispatch(
-                &event,
-                &mut adapters,
-                config.failure_policy,
-                &adapter_meta,
-            )
+            dispatch(&event, &mut adapters, config.failure_policy, &adapter_meta)
         }
     }
 }

@@ -34,11 +34,15 @@ pub fn validate_sql_mappings(
             }
         }
 
-        // Rule D: primary key must exist in columns
-        if !mapping.columns.contains_key(&mapping.primary_key) {
+        // Rule D: every primary key column (composite keys included) must exist in columns
+        if let Some(missing) = mapping
+            .primary_key
+            .iter()
+            .find(|c| !mapping.columns.contains_key(c.as_str()))
+        {
             return Err(format!(
-                "Primary key '{}' not found in columns for event '{}'",
-                mapping.primary_key, event
+                "Primary key column '{}' not found in columns for event '{}'",
+                missing, event
             ));
         }
     }
