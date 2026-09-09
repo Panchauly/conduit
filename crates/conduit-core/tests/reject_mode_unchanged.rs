@@ -139,7 +139,7 @@ document:
         r2.outcome
     );
 
-    let content = std::fs::read_to_string(root.join("UserUpdated").join("u1.json"))?;
+    let content = std::fs::read_to_string(root.join("users").join("u1.json"))?;
     assert!(
         content.contains("\"s1\""),
         "ignore mode must never rewrite the document: {content}"

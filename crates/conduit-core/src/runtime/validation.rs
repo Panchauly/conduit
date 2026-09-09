@@ -3,9 +3,9 @@
 use core::fmt;
 use std::collections::{HashMap, HashSet};
 
-use crate::adapter::OnExisting;
 use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::sql::mapping::SqlMapping;
+use crate::adapter::{OnExisting, Operation};
 use crate::routing::AdapterId;
 use crate::runtime::config::{AdapterCapability, AdapterConfig, ConduitConfig};
 use crate::runtime::dependency_graph::{
@@ -222,6 +222,7 @@ fn cap_label(c: &AdapterCapability) -> &'static str {
         AdapterCapability::Idempotent => "idempotent",
         AdapterCapability::Upsert => "upsert",
         AdapterCapability::Transactions => "transactions",
+        AdapterCapability::Delete => "delete",
     }
 }
 
@@ -308,16 +309,21 @@ fn effective_capabilities(adapter: &AdapterConfig) -> HashSet<AdapterCapability>
     }
 }
 
-/// Effective required capabilities for a mapping (Phase 12.5): `on_existing:
-/// replace` implies `Upsert`, whether or not the mapping's
-/// `requires_capabilities` lists it explicitly.
+/// Effective required capabilities for a mapping (Phase 12.5, extended
+/// 13.5): `on_existing: replace` implies `Upsert`, and `operation: delete`
+/// implies `Delete` — whether or not the mapping's `requires_capabilities`
+/// lists them explicitly.
 fn required_capabilities(
     declared: &[AdapterCapability],
     on_existing: OnExisting,
+    operation: Operation,
 ) -> Vec<AdapterCapability> {
     let mut required = declared.to_vec();
     if on_existing == OnExisting::Replace && !required.contains(&AdapterCapability::Upsert) {
         required.push(AdapterCapability::Upsert);
+    }
+    if operation == Operation::Delete && !required.contains(&AdapterCapability::Delete) {
+        required.push(AdapterCapability::Delete);
     }
     required
 }
@@ -506,6 +512,16 @@ pub fn validate_projection_config(
                 event: key.clone(),
                 reason: format!("primary_key column '{}' not found in columns", missing),
             });
+        } else if m.operation == Operation::Delete && m.columns.len() != m.primary_key.len() {
+            // Phase 13.1: a delete mapping resolves only the entity key — no
+            // hidden projection body. The previous branch already guarantees
+            // every primary_key column is present in columns; matching
+            // lengths means columns can't contain anything else.
+            report.push(ValidationIssue::InvalidSqlMapping {
+                event: key.clone(),
+                reason: "delete mapping's columns may only contain the primary_key column(s)"
+                    .into(),
+            });
         } else if m.version < 1 {
             report.push(ValidationIssue::InvalidSqlMapping {
                 event: key.clone(),
@@ -532,10 +548,17 @@ pub fn validate_projection_config(
                 event: key.clone(),
                 reason: "empty collection".into(),
             });
-        } else if document_template_empty(&m.document) {
+        } else if m.operation == Operation::Upsert && document_template_empty(&m.document) {
             report.push(ValidationIssue::InvalidDocumentMapping {
                 event: key.clone(),
                 reason: "document template must not be empty (null, {}, or [])".into(),
+            });
+        } else if m.operation == Operation::Delete && !document_template_empty(&m.document) {
+            // Phase 13.1: a delete mapping resolves only the entity key — no
+            // hidden projection body.
+            report.push(ValidationIssue::InvalidDocumentMapping {
+                event: key.clone(),
+                reason: "delete mapping's document must be empty (null, {}, or [])".into(),
             });
         } else if m.id.trim().is_empty() {
             report.push(ValidationIssue::InvalidDocumentMapping {
@@ -576,8 +599,11 @@ pub fn validate_projection_config(
                     continue;
                 };
                 let eff = effective_capabilities(ac);
-                let required =
-                    required_capabilities(&sql_map.requires_capabilities, sql_map.on_existing);
+                let required = required_capabilities(
+                    &sql_map.requires_capabilities,
+                    sql_map.on_existing,
+                    sql_map.operation,
+                );
                 let missing: Vec<_> = required.into_iter().filter(|c| !eff.contains(c)).collect();
                 if !missing.is_empty() {
                     report.push(ValidationIssue::CapabilityMismatch {
@@ -595,8 +621,11 @@ pub fn validate_projection_config(
                     continue;
                 };
                 let eff = effective_capabilities(ac);
-                let required =
-                    required_capabilities(&doc_map.requires_capabilities, doc_map.on_existing);
+                let required = required_capabilities(
+                    &doc_map.requires_capabilities,
+                    doc_map.on_existing,
+                    doc_map.operation,
+                );
                 let missing: Vec<_> = required.into_iter().filter(|c| !eff.contains(c)).collect();
                 if !missing.is_empty() {
                     report.push(ValidationIssue::CapabilityMismatch {

@@ -171,14 +171,14 @@ document:
     // No second file: this is the case Phase 4 (event_id-keyed guard, event_id-keyed
     // path) missed entirely — a redelivered creation event under a new event_id used
     // to write a second, silent duplicate file.
-    let entries: Vec<_> = std::fs::read_dir(root.join("UserCreated"))?.collect();
+    let entries: Vec<_> = std::fs::read_dir(root.join("users"))?.collect();
     assert_eq!(
         entries.len(),
         1,
         "duplicate entity must not produce a second file"
     );
 
-    let content = std::fs::read_to_string(root.join("UserCreated").join("u1.json"))?;
+    let content = std::fs::read_to_string(root.join("users").join("u1.json"))?;
     assert!(
         content.contains("first@example.com"),
         "first creation wins — its data is what persists: {}",

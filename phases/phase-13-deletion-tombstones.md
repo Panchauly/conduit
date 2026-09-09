@@ -1,4 +1,4 @@
-# Phase 13 — Deletion & Tombstones 🎯 (Planned)
+# Phase 13 — Deletion & Tombstones 🎯 (Completed)
 
 **Goal:** An event can *remove* a projected entity. The projection reflects end-of-life, not only creation (Phase 11) and mutation (Phase 12). Deletion is sequence-gated like an upsert, so a delete and a late update converge to one deterministic state regardless of delivery order.
 
@@ -9,7 +9,7 @@
 
 ---
 
-## Phase 13.1 — Delete operation declaration 🏷️ (Planned)
+## Phase 13.1 — Delete operation declaration 🏷️ (Completed)
 
 **Scope**
 - New field on `SqlMapping` and `DocumentMapping`: `operation`, `#[serde(default)]`, `#[serde(rename_all = "snake_case")]`:
@@ -48,7 +48,7 @@
 
 ---
 
-## Phase 13.2 — SQL delete & tombstone 🗄️ (Planned)
+## Phase 13.2 — SQL delete & tombstone 🗄️ (Completed)
 
 **Scope**
 - `conduit_projection_state` gains `deleted INTEGER NOT NULL DEFAULT 0`. The guard row is a **tombstone** when `deleted = 1` — it is never removed, so a later stale event (a replayed older `create`, a re-delivered delete) is still gated.
@@ -66,7 +66,7 @@
 
 ---
 
-## Phase 13.3 — Document delete & tombstone 📄 (Planned)
+## Phase 13.3 — Document delete & tombstone 📄 (Completed)
 
 **Scope**
 - The Phase 12.4 sidecar gains `"deleted": bool`. Never removed once written.
@@ -83,7 +83,7 @@
 
 ---
 
-## Phase 13.4 — Resurrection & permanent tombstones ♻️ (Planned)
+## Phase 13.4 — Resurrection & permanent tombstones ♻️ (Completed)
 
 **Scope**
 - **Default: resurrection.** An `upsert` event whose `sequence` exceeds a tombstone's `last_sequence` re-inserts the entity (`deleted → 0`, `last_sequence` bumped). Rationale: the projection must reflect the highest-sequence truth for an entity; if a `UserReactivated` at sequence M follows a `UserDeleted` at N < M, the entity legitimately exists again. Determinism holds — replay in any order, the highest-sequence event per entity wins, delete or not.
@@ -95,7 +95,7 @@
 
 ---
 
-## Phase 13.5 — Capability-safe validation ✅ (Planned)
+## Phase 13.5 — Capability-safe validation ✅ (Completed)
 
 **Scope**
 - `operation: delete` implies `requires_capabilities: [delete]` (Phase 6.4 / Phase 8 machinery).
@@ -109,7 +109,7 @@
 
 ---
 
-## Phase 13.6 — Determinism & verification suite 🧪 (Planned)
+## Phase 13.6 — Determinism & verification suite 🧪 (Completed)
 
 New integration tests in `crates/conduit-core/tests/`, fixtures under `tests/fixtures/`:
 
@@ -118,7 +118,7 @@ New integration tests in `crates/conduit-core/tests/`, fixtures under `tests/fix
 | `delete_full_lifecycle.rs` | `[create s1, update s2, delete s3]` (SQL and document) → entity absent; guard is a tombstone at sequence 3. |
 | `delete_before_create.rs` | `delete s2` then `create s1` → entity absent (the create is `SkipStale`). |
 | `delete_shuffled_stream.rs` | The lifecycle stream fed in several orders → identical final state (absent) each time. |
-| `delete_redelivery.rs` | The same delete event twice → second is `Skipped(AlreadyDeleted)`; table / file / guard byte-identical. |
+| `delete_redelivery.rs` | An exact redelivery (same `sequence`) → `Skipped(StaleSequence)`, per the 13.1 decision table's `<= stored` row (same "redelivery" contract as Phase 12.3's upsert case); table/file/guard unchanged. A *different*, newer-sequence delete on an already-tombstoned entity → `Skipped(AlreadyDeleted)`, `last_sequence` bumped. |
 | `resurrection.rs` | `[create s1, delete s2, recreate s3]` → entity present with sequence-3 state; `recreate s0` after the delete → `SkipStale`. |
 | `permanent_tombstone.rs` | `delete permanent s2`, then `upsert s5` → `Skipped(Tombstoned)`; entity stays absent. |
 | `delete_composite_key.rs` | Bridge-table row removed by `primary_key: [left, right]`; a different pair is untouched. |

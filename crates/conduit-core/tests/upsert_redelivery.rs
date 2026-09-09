@@ -147,12 +147,12 @@ document:
         r1.outcome
     );
 
-    let doc_path = root.join("UserUpdated").join("u1.json");
+    let doc_path = root.join("users").join("u1.json");
     let content_before = std::fs::read_to_string(&doc_path)?;
     let guard_path = root
         .join(".conduit")
         .join("entities")
-        .join("UserUpdated")
+        .join("users")
         .join("u1.done");
     let guard_before = std::fs::read_to_string(&guard_path)?;
 

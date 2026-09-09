@@ -24,7 +24,7 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 10 | Projection Versioning & Schema Evolution (10.1–10.4) | ✅ Completed | [phases/phase-10-versioning-schema-evolution.md](phases/phase-10-versioning-schema-evolution.md) |
 | 11 | Entity-Aware Idempotent Insert | ✅ Completed | [phases/phase-11-entity-aware-idempotent-insert.md](phases/phase-11-entity-aware-idempotent-insert.md) |
 | 12 | Sequence-Gated Upsert (12.1–12.6) | ✅ Completed | [phases/phase-12-sequence-gated-upsert.md](phases/phase-12-sequence-gated-upsert.md) |
-| 13 | Deletion & Tombstones (13.1–13.6) | 🎯 Planned | [phases/phase-13-deletion-tombstones.md](phases/phase-13-deletion-tombstones.md) |
+| 13 | Deletion & Tombstones (13.1–13.6) | ✅ Completed | [phases/phase-13-deletion-tombstones.md](phases/phase-13-deletion-tombstones.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md)
 

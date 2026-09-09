@@ -1,7 +1,6 @@
-//! Phase 12.6: the same create+update stream, projected independently into
-//! SQL and a document store, converges to matching entity state in both —
-//! each adapter runs the same `decide()` gate off the same `event.sequence`,
-//! with no coordination between them.
+//! Phase 13.6: the same `[create, update, delete]` lifecycle stream projected
+//! independently into SQL and a document store — both end absent, and both
+//! tombstones agree on the sequence at which the entity was removed.
 
 use conduit_core::adapter::StorageAdapter;
 use conduit_core::adapter::document::file::FileDocumentAdapter;
@@ -19,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tempfile::tempdir;
 
-fn create_then_update_events() -> Vec<Event> {
+fn lifecycle_events() -> Vec<Event> {
     vec![
         Event {
             event_id: "e1".to_string(),
@@ -39,8 +38,8 @@ fn create_then_update_events() -> Vec<Event> {
         },
         Event {
             event_id: "e3".to_string(),
-            event_type: "UserUpdated".to_string(),
-            payload: r#"{"id":"u1","name":"Alice R2"}"#.to_string(),
+            event_type: "UserDeleted".to_string(),
+            payload: r#"{"id":"u1"}"#.to_string(),
             metadata: HashMap::new(),
             version: 1,
             sequence: 3,
@@ -49,8 +48,7 @@ fn create_then_update_events() -> Vec<Event> {
 }
 
 #[test]
-fn sql_and_document_projections_agree_on_final_entity_state()
--> Result<(), Box<dyn std::error::Error>> {
+fn sql_and_document_agree_after_the_same_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempdir()?;
 
     // --- SQL ---
@@ -72,6 +70,20 @@ on_existing: replace
 columns:
   id: payload.id
   name: payload.name
+"#,
+        )?,
+    );
+    sql_mappings.insert(
+        "UserDeleted".to_string(),
+        serde_yaml::from_str::<SqlMapping>(
+            r#"
+event: UserDeleted
+table: users
+primary_key: id
+version: 1
+operation: delete
+columns:
+  id: payload.id
 "#,
         )?,
     );
@@ -102,6 +114,19 @@ document:
 "#,
         )?,
     );
+    doc_mappings.insert(
+        "UserDeleted".to_string(),
+        serde_yaml::from_str::<DocumentMapping>(
+            r#"
+event: UserDeleted
+collection: users
+version: 1
+id: payload.id
+operation: delete
+document: {}
+"#,
+        )?,
+    );
     let doc_adapter = FileDocumentAdapter::new(
         "file".to_string(),
         root.clone(),
@@ -111,29 +136,38 @@ document:
         MigrationPolicy::default(),
     );
 
-    // Drive the same stream into both adapters independently.
-    for event in create_then_update_events() {
+    for event in lifecycle_events() {
         let sql_result = sql_adapter.handle(&event);
         assert!(sql_result.is_success(), "{:?}", sql_result.outcome);
-
         let doc_result = doc_adapter.handle(&event);
         assert!(doc_result.is_success(), "{:?}", doc_result.outcome);
     }
 
     let conn = Connection::open(&db_path)?;
-    let sql_name: String =
-        conn.query_row("SELECT name FROM users WHERE id = 'u1'", [], |r| r.get(0))?;
+    let sql_count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
+    let sql_last_sequence: i64 = conn.query_row(
+        "SELECT last_sequence FROM conduit_projection_state WHERE target_table = 'users'",
+        [],
+        |r| r.get(0),
+    )?;
 
-    let doc_content = std::fs::read_to_string(root.join("users").join("u1.json"))?;
-    let doc_value: serde_json::Value = serde_json::from_str(&doc_content)?;
-    let doc_name = doc_value["name"].as_str().unwrap();
-
-    assert_eq!(sql_name, "Alice R2");
-    assert_eq!(doc_name, "Alice R2");
-    assert_eq!(
-        sql_name, doc_name,
-        "SQL and document projections must agree"
+    assert_eq!(sql_count, 0, "SQL entity must be absent");
+    assert!(
+        !root.join("users").join("u1.json").exists(),
+        "document entity must be absent"
     );
+
+    let doc_guard_content = std::fs::read_to_string(
+        root.join(".conduit")
+            .join("entities")
+            .join("users")
+            .join("u1.done"),
+    )?;
+    let doc_guard: serde_json::Value = serde_json::from_str(&doc_guard_content)?;
+
+    assert_eq!(sql_last_sequence, 3);
+    assert_eq!(doc_guard["last_sequence"], 3);
+    assert_eq!(doc_guard["deleted"], true);
 
     Ok(())
 }

@@ -366,6 +366,14 @@ fn print_text_report(report: &ExecutionReport) {
                     r.duration_ms.unwrap_or(0)
                 );
             }
+            AdapterOutcome::Deleted => {
+                println!(
+                    "✓ {} ({}) — deleted — {} ms",
+                    r.adapter_id,
+                    format_storage_kind(r.storage_kind),
+                    r.duration_ms.unwrap_or(0)
+                );
+            }
             AdapterOutcome::Skipped { reason } => {
                 println!(
                     "~ {} ({}) — skipped: {}",
@@ -417,6 +425,8 @@ fn format_skip_reason(reason: SkipReason) -> &'static str {
         SkipReason::AlreadyProjected => "already projected",
         SkipReason::StaleSequence => "stale sequence",
         SkipReason::UnsupportedVersion => "unsupported version: no upcaster chain",
+        SkipReason::AlreadyDeleted => "already deleted",
+        SkipReason::Tombstoned => "permanently tombstoned",
     }
 }
 

@@ -117,7 +117,7 @@ document:
     let r2 = adapter.handle(&event);
     assert!(r2.is_success(), "{:?}", r2.outcome);
 
-    let entries: Vec<_> = std::fs::read_dir(root.join("UserCreated"))?.collect();
+    let entries: Vec<_> = std::fs::read_dir(root.join("users"))?.collect();
     assert_eq!(
         entries.len(),
         1,
