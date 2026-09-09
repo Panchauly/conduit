@@ -1,4 +1,4 @@
-# Phase 12 — Sequence-Gated Upsert 🎯 (Planned)
+# Phase 12 — Sequence-Gated Upsert 🎯 (Completed)
 
 **Goal:** An entity already projected by Conduit can be *updated* by later events, not only created once. Which write wins is decided by the event's `sequence`, not its delivery order — so a mixed create+update stream replayed in any order converges to one deterministic state. Scoped to full-entity replacement (no partial-column or delta updates; see Non-Goals).
 
@@ -28,7 +28,7 @@ The guard is keyed by `entity_key` (Phase 11.1 canonical encoding). Conduit comp
 
 ---
 
-## Phase 12.1 — Adapter outcome model 📊 (Planned)
+## Phase 12.1 — Adapter outcome model 📊 (Completed)
 
 **Goal:** Replace the `success: bool` + `AdapterError::Skipped(String)` encoding with a machine-readable outcome, before any write-mode logic depends on telling six results apart.
 
@@ -54,7 +54,7 @@ The guard is keyed by `entity_key` (Phase 11.1 canonical encoding). Conduit comp
 
 ---
 
-## Phase 12.2 — Write mode & the gated decision 🚦 (Planned)
+## Phase 12.2 — Write mode & the gated decision 🚦 (Completed)
 
 **Scope**
 - New field on `SqlMapping` and `DocumentMapping`: `on_existing`, `#[serde(default)]`, `#[serde(rename_all = "snake_case")]`:
@@ -86,7 +86,7 @@ The guard is keyed by `entity_key` (Phase 11.1 canonical encoding). Conduit comp
 
 ---
 
-## Phase 12.3 — SQL upsert 🗄️ (Planned)
+## Phase 12.3 — SQL upsert 🗄️ (Completed)
 
 **Scope**
 - `SqlMapping::build()` gains an upsert form for `on_existing: replace`:
@@ -113,7 +113,7 @@ The guard is keyed by `entity_key` (Phase 11.1 canonical encoding). Conduit comp
 
 ---
 
-## Phase 12.4 — Document upsert 📄 (Planned)
+## Phase 12.4 — Document upsert 📄 (Completed)
 
 **Scope**
 - The Phase 11.3 guard marker becomes a small JSON sidecar: `{ "last_sequence": u64, "last_event_id": String }`, still committed via write-temp-then-rename (`file.rs::commit_guard`).
@@ -131,7 +131,7 @@ The guard is keyed by `entity_key` (Phase 11.1 canonical encoding). Conduit comp
 
 ---
 
-## Phase 12.5 — Capability-safe validation ✅ (Planned)
+## Phase 12.5 — Capability-safe validation ✅ (Completed)
 
 **Scope**
 - `on_existing: replace` implies `requires_capabilities: [upsert]` for that mapping (Phase 6.4 / Phase 8 machinery).
@@ -145,7 +145,7 @@ The guard is keyed by `entity_key` (Phase 11.1 canonical encoding). Conduit comp
 
 ---
 
-## Phase 12.6 — Determinism & verification suite 🧪 (Planned)
+## Phase 12.6 — Determinism & verification suite 🧪 (Completed)
 
 New integration tests in `crates/conduit-core/tests/`, fixtures under `tests/fixtures/`:
 

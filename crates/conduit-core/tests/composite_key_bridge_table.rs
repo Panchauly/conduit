@@ -6,7 +6,7 @@
 use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use conduit_core::adapter::sql::sqlite::SqliteAdapter;
-use conduit_core::adapter::{AdapterError, StorageAdapter};
+use conduit_core::adapter::{AdapterOutcome, SkipReason, StorageAdapter};
 use conduit_core::event::Event;
 use conduit_core::runtime::config::MigrationPolicy;
 use conduit_core::upcast::UpcasterRegistry;
@@ -72,21 +72,25 @@ columns:
     let distinct = tag_assigned("evt-3", 3, "post-1", "tag-b");
 
     let r1 = adapter.handle(&first);
-    assert!(r1.success, "{:?}", r1.error);
+    assert!(r1.is_success(), "{:?}", r1.outcome);
 
     let r2 = adapter.handle(&duplicate);
-    assert!(r2.success, "{:?}", r2.error);
+    assert!(r2.is_success(), "{:?}", r2.outcome);
     assert!(
-        matches!(r2.error, Some(AdapterError::Skipped(_))),
+        matches!(
+            r2.outcome,
+            AdapterOutcome::Skipped(SkipReason::AlreadyProjected)
+        ),
         "duplicate composite pair must be a clean skip, got {:?}",
-        r2.error
+        r2.outcome
     );
 
     let r3 = adapter.handle(&distinct);
-    assert!(r3.success, "{:?}", r3.error);
+    assert!(r3.is_success(), "{:?}", r3.outcome);
     assert!(
-        r3.error.is_none(),
-        "a genuinely distinct composite pair must not be skipped"
+        matches!(r3.outcome, AdapterOutcome::Created),
+        "a genuinely distinct composite pair must not be skipped, got {:?}",
+        r3.outcome
     );
 
     let conn = Connection::open(&db_path)?;

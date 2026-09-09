@@ -56,7 +56,7 @@ document:
     };
 
     let result = adapter.handle(&event);
-    assert!(result.success, "{:?}", result.error);
+    assert!(result.is_success(), "{:?}", result.outcome);
 
     let by_entity = root.join("UserCreated").join("entity-42.json");
     let by_event = root

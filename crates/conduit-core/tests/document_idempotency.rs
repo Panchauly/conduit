@@ -70,10 +70,10 @@ document:
     // --------------------------------------------------
 
     let r1 = adapter.handle(&event);
-    assert!(r1.success);
+    assert!(r1.is_success());
 
     let r2 = adapter.handle(&event);
-    assert!(r2.success);
+    assert!(r2.is_success());
 
     // Verify document exists exactly once, keyed by entity id (Phase 11.1/11.3)
     let doc_path = root.join("UserCreated").join("u1.json");

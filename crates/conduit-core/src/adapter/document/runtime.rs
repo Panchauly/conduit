@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::adapter::DocumentError;
 use super::mapping::DocumentMapping;
+use crate::adapter::OnExisting;
 use crate::event::Event;
 use crate::upcast::UpcasterRegistry;
 
@@ -13,6 +14,9 @@ pub struct DocumentProjection {
     /// Resolved entity identity (Phase 11.1) — keys the idempotency guard and
     /// the output filename (Phase 11.3), rather than `event.event_id`.
     pub entity_id: String,
+    /// The mapping's write mode (Phase 12.2) — governs the gated
+    /// insert/update/skip decision in the adapter.
+    pub on_existing: OnExisting,
 }
 
 /// Owned runtime builder (Phase 2)
@@ -47,6 +51,7 @@ impl DocumentRuntimeBuilder {
                 entity_id,
                 source_version,
                 projected_version,
+                on_existing: mapping.on_existing,
             });
         }
 
@@ -81,6 +86,7 @@ impl DocumentRuntimeBuilder {
             entity_id,
             source_version,
             projected_version,
+            on_existing: mapping.on_existing,
         })
     }
 }

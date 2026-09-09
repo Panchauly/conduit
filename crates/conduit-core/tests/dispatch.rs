@@ -34,7 +34,7 @@ impl StorageAdapter for TestAdapter {
     fn handle(&self, _event: &Event) -> AdapterResult {
         // adapter_id 🔴 THIS MUST MATCH routing.json
         if self.succeed {
-            AdapterResult::success(self.id.to_string(), self.kind)
+            AdapterResult::created(self.id.to_string(), self.kind)
         } else {
             AdapterResult::failure(
                 self.id.to_string(),
@@ -129,7 +129,7 @@ fn dispatch_executes_all_targeted_adapters() {
         report
             .adapter_reports
             .iter()
-            .all(|r| r.outcome == AdapterOutcome::Succeeded)
+            .all(|r| r.outcome == AdapterOutcome::Created)
     );
 }
 
@@ -160,10 +160,7 @@ fn dispatch_stops_on_adapter_failure() {
 
     assert_eq!(report.adapter_reports.len(), 1);
     assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
-    assert_eq!(
-        report.adapter_reports[0].outcome,
-        AdapterOutcome::WriteFailed
-    );
+    assert_eq!(report.adapter_reports[0].outcome, AdapterOutcome::Failed);
     assert_eq!(report.status, ExecutionStatus::Failed);
 }
 
@@ -190,11 +187,8 @@ fn dispatch_continue_on_error_runs_all_adapters() {
     let report = dispatch(&event, &mut adapters, FailurePolicy::ContinueOnError, &meta);
 
     assert_eq!(report.adapter_reports.len(), 2);
-    assert_eq!(
-        report.adapter_reports[0].outcome,
-        AdapterOutcome::WriteFailed
-    );
-    assert_eq!(report.adapter_reports[1].outcome, AdapterOutcome::Succeeded);
+    assert_eq!(report.adapter_reports[0].outcome, AdapterOutcome::Failed);
+    assert_eq!(report.adapter_reports[1].outcome, AdapterOutcome::Created);
     assert_eq!(report.status, ExecutionStatus::Failed);
 }
 

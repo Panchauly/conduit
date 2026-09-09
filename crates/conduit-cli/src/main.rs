@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use conduit_core::adapter::SkipReason;
 use conduit_core::execution::{
     AdapterOutcome, AdapterReportError, ExecutionReport, ExecutionStatus,
 };
@@ -349,33 +350,33 @@ fn print_text_report(report: &ExecutionReport) {
 
     for r in &report.adapter_reports {
         match r.outcome {
-            AdapterOutcome::Succeeded => {
+            AdapterOutcome::Created => {
                 println!(
-                    "✓ {} ({}) — {} ms",
+                    "✓ {} ({}) — created — {} ms",
                     r.adapter_id,
                     format_storage_kind(r.storage_kind),
                     r.duration_ms.unwrap_or(0)
                 );
             }
-            AdapterOutcome::Skipped => {
+            AdapterOutcome::Updated => {
+                println!(
+                    "✓ {} ({}) — updated — {} ms",
+                    r.adapter_id,
+                    format_storage_kind(r.storage_kind),
+                    r.duration_ms.unwrap_or(0)
+                );
+            }
+            AdapterOutcome::Skipped { reason } => {
                 println!(
                     "~ {} ({}) — skipped: {}",
                     r.adapter_id,
                     format_storage_kind(r.storage_kind),
-                    extract_error(r.error.as_ref())
+                    format_skip_reason(reason)
                 );
             }
-            AdapterOutcome::WriteFailed => {
+            AdapterOutcome::Failed => {
                 println!(
                     "✗ {} ({}) — {}",
-                    r.adapter_id,
-                    format_storage_kind(r.storage_kind),
-                    extract_error(r.error.as_ref())
-                );
-            }
-            AdapterOutcome::UnsupportedVersion => {
-                println!(
-                    "✗ {} ({}) — unsupported version: {}",
                     r.adapter_id,
                     format_storage_kind(r.storage_kind),
                     extract_error(r.error.as_ref())
@@ -406,9 +407,16 @@ fn format_storage_kind(kind: StorageKind) -> &'static str {
 fn extract_error(err: Option<&AdapterReportError>) -> &str {
     match err {
         Some(AdapterReportError::WriteFailed { message }) => message,
-        Some(AdapterReportError::Skipped { message }) => message,
         Some(AdapterReportError::UnsupportedVersion { message }) => message,
         None => "unknown",
+    }
+}
+
+fn format_skip_reason(reason: SkipReason) -> &'static str {
+    match reason {
+        SkipReason::AlreadyProjected => "already projected",
+        SkipReason::StaleSequence => "stale sequence",
+        SkipReason::UnsupportedVersion => "unsupported version: no upcaster chain",
     }
 }
 

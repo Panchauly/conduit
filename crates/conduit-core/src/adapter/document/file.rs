@@ -1,17 +1,28 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     adapter::document::adapter::DocumentError,
     adapter::document::runtime::DocumentRuntimeBuilder,
-    adapter::{AdapterError, AdapterResult, StorageAdapter},
+    adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter, WriteDecision, decide},
     event::Event,
     routing::StorageKind,
     runtime::config::MigrationPolicy,
     upcast::UpcasterRegistry,
 };
 
-/// File-based document adapter (Phase 4: idempotent)
+/// Idempotency guard sidecar (Phase 11.3 marker, Phase 12.4 sequence-gated
+/// upsert): `last_sequence` is what `decide()` compares `event.sequence`
+/// against for `on_existing: replace` mappings.
+#[derive(Debug, Serialize, Deserialize)]
+struct ProjectionGuard {
+    last_sequence: u64,
+    last_event_id: String,
+}
+
+/// File-based document adapter (Phase 4: idempotent; Phase 12: sequence-gated upsert)
 pub struct FileDocumentAdapter {
     id: String,
     priority: u32,
@@ -55,10 +66,26 @@ impl FileDocumentAdapter {
             .join(format!("{}.done", entity_id))
     }
 
+    /// Read the guard sidecar if present. `Ok(None)` means no entity has been
+    /// projected here yet; a corrupt sidecar is a write failure, not treated
+    /// as absent (silently forgetting `last_sequence` would let a stale event
+    /// through under `on_existing: replace`).
+    fn read_guard(&self, guard: &Path) -> std::io::Result<Option<ProjectionGuard>> {
+        match std::fs::read_to_string(guard) {
+            Ok(content) => {
+                let parsed: ProjectionGuard = serde_json::from_str(&content)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                Ok(Some(parsed))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Commit the guard via write-to-temp-then-rename, so a reader can never
     /// observe a partially-written guard file (closes the check-then-write
     /// race the old direct `fs::write` guard had).
-    fn commit_guard(&self, guard: &Path) -> std::io::Result<()> {
+    fn commit_guard(&self, guard: &Path, state: &ProjectionGuard) -> std::io::Result<()> {
         let parent = guard.parent().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -76,7 +103,9 @@ impl FileDocumentAdapter {
             std::process::id()
         );
         let tmp = parent.join(tmp_name);
-        std::fs::write(&tmp, b"ok")?;
+        let content = serde_json::to_string(state)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(&tmp, content)?;
         std::fs::rename(&tmp, guard)
     }
 }
@@ -115,10 +144,10 @@ impl StorageAdapter for FileDocumentAdapter {
                         from_version,
                         to_version,
                     ),
-                    MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_version(
+                    MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_versioned(
                         self.id.clone(),
                         StorageKind::Document,
-                        reason,
+                        SkipReason::UnsupportedVersion,
                         from_version,
                         to_version,
                     ),
@@ -127,27 +156,50 @@ impl StorageAdapter for FileDocumentAdapter {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
-        let guard = self.guard_path(&event.event_type, &projection.entity_id);
+        let guard_path = self.guard_path(&event.event_type, &projection.entity_id);
+
+        // PHASE 11.3/12.4: read the guard sidecar for this entity — read
+        // -decide-write. Known limitation (Phase 12 non-goal): this is not
+        // atomic across processes; the file adapter assumes a single writer.
+        let stored_guard = match self.read_guard(&guard_path) {
+            Ok(g) => g,
+            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
+        };
+        let exists = stored_guard.is_some();
+        let stored_last_sequence = stored_guard.map(|g| g.last_sequence);
+
+        let is_update = match decide(
+            projection.on_existing,
+            exists,
+            stored_last_sequence,
+            event.sequence,
+        ) {
+            WriteDecision::SkipIdempotent => {
+                return AdapterResult::skipped_versioned(
+                    self.id.clone(),
+                    StorageKind::Document,
+                    SkipReason::AlreadyProjected,
+                    projection.source_version,
+                    projection.projected_version,
+                );
+            }
+            WriteDecision::SkipStale => {
+                return AdapterResult::skipped_versioned(
+                    self.id.clone(),
+                    StorageKind::Document,
+                    SkipReason::StaleSequence,
+                    projection.source_version,
+                    projection.projected_version,
+                );
+            }
+            WriteDecision::Insert => false,
+            WriteDecision::Update => true,
+        };
 
         // --------------------------------------------------
-        // PHASE 11.3: entity-aware idempotency check (BEFORE write). Supersedes
-        // the Phase 4 event_id-keyed guard: a redelivered creation event with a
-        // new event_id for the same entity is skipped here too, not just an
-        // exact event_id replay.
-        // --------------------------------------------------
-        if guard.exists() {
-            return AdapterResult::skipped(
-                self.id.clone(),
-                StorageKind::Document,
-                format!("entity '{}' already projected", projection.entity_id),
-            );
-        }
-
-        // --------------------------------------------------
-        // Output path keyed by entity, not event (Phase 11.1/11.3): a
-        // redelivered creation event with a new event_id for the same entity
-        // overwrites nothing new — the guard above already caught it — and a
-        // legitimate first write always lands at the entity's own path.
+        // Output path keyed by entity, not event (Phase 11.1/11.3). For
+        // `on_existing: replace`, `Update` overwrites this same path with the
+        // full new projected state (Phase 12.4) — no partial-column writes.
         // --------------------------------------------------
         let write_result: Result<(), Box<dyn std::error::Error>> = (|| {
             let out_path = self
@@ -171,18 +223,29 @@ impl StorageAdapter for FileDocumentAdapter {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
-        // --------------------------------------------------
-        // PHASE 11.3: commit the guard AFTER the write, via atomic rename.
-        // --------------------------------------------------
-        if let Err(e) = self.commit_guard(&guard) {
+        // PHASE 11.3/12.4: commit the guard AFTER the write, via atomic rename.
+        let new_guard = ProjectionGuard {
+            last_sequence: event.sequence,
+            last_event_id: event.event_id.clone(),
+        };
+        if let Err(e) = self.commit_guard(&guard_path, &new_guard) {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
-        AdapterResult::success_versioned(
-            self.id.clone(),
-            StorageKind::Document,
-            projection.source_version,
-            projection.projected_version,
-        )
+        if is_update {
+            AdapterResult::updated_versioned(
+                self.id.clone(),
+                StorageKind::Document,
+                projection.source_version,
+                projection.projected_version,
+            )
+        } else {
+            AdapterResult::created_versioned(
+                self.id.clone(),
+                StorageKind::Document,
+                projection.source_version,
+                projection.projected_version,
+            )
+        }
     }
 }
