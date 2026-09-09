@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crate::adapter::document::loader::load_document_mappings;
 use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::keyvalue::loader::load_keyvalue_mappings;
+use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::loader::load_sql_mappings;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::event::Event;
@@ -115,18 +117,31 @@ pub fn load_config(path: &Path) -> Result<ConduitConfig, PipelineError> {
     Ok(config)
 }
 
-/// SQL and document mapping tables keyed by event type.
+/// SQL, document, and key-value mapping tables keyed by event type.
 pub type LoadedMappings = (
     HashMap<String, SqlMapping>,
     HashMap<String, DocumentMapping>,
+    HashMap<String, KvMapping>,
 );
 
-/// Load SQL and document mappings from `<mappings_dir>/sql` and `<mappings_dir>/document`.
+/// Load SQL, document, and key-value mappings from `<mappings_dir>/sql`,
+/// `<mappings_dir>/document`, and `<mappings_dir>/keyvalue`.
+///
+/// `sql/` and `document/` are mandatory (Phase 3/11 convention — always
+/// present, empty is fine). `keyvalue/` (Phase 14) is optional: a project
+/// with no key-value mappings need not create the directory at all, so
+/// adopting Phase 14 doesn't force a change on every existing project.
 pub fn load_mappings(mappings_dir: &Path) -> Result<LoadedMappings, PipelineError> {
     let sql = load_sql_mappings(mappings_dir.join("sql")).map_err(PipelineError::Mapping)?;
     let doc =
         load_document_mappings(mappings_dir.join("document")).map_err(PipelineError::Mapping)?;
-    Ok((sql, doc))
+    let kv_dir = mappings_dir.join("keyvalue");
+    let kv = if kv_dir.is_dir() {
+        load_keyvalue_mappings(&kv_dir).map_err(PipelineError::Mapping)?
+    } else {
+        HashMap::new()
+    };
+    Ok((sql, doc, kv))
 }
 
 /// Load a single [Event] from a JSON file.
@@ -140,6 +155,7 @@ pub struct LoadedProject {
     pub config: ConduitConfig,
     pub sql_mappings: HashMap<String, SqlMapping>,
     pub doc_mappings: HashMap<String, DocumentMapping>,
+    pub kv_mappings: HashMap<String, KvMapping>,
     pub routing_rules: HashMap<String, Vec<AdapterId>>,
 }
 
@@ -149,14 +165,21 @@ pub fn load_project(
     mappings_dir: &Path,
 ) -> Result<LoadedProject, PipelineError> {
     let config = load_config(config_path)?;
-    let (sql_mappings, doc_mappings) = load_mappings(mappings_dir)?;
+    let (sql_mappings, doc_mappings, kv_mappings) = load_mappings(mappings_dir)?;
     let routing_path = resolve_routing_path(config_path, &config.routing.file);
     let routing_rules = load_routing(&routing_path).map_err(PipelineError::Routing)?;
-    validate_projection_config(&config, &routing_rules, &sql_mappings, &doc_mappings)?;
+    validate_projection_config(
+        &config,
+        &routing_rules,
+        &sql_mappings,
+        &doc_mappings,
+        &kv_mappings,
+    )?;
     Ok(LoadedProject {
         config,
         sql_mappings,
         doc_mappings,
+        kv_mappings,
         routing_rules,
     })
 }
@@ -177,6 +200,7 @@ pub fn run(
         &project.config,
         project.sql_mappings,
         project.doc_mappings,
+        project.kv_mappings,
         event,
     ))
 }
@@ -193,6 +217,7 @@ pub fn dry_run(
         &project.config,
         project.sql_mappings,
         project.doc_mappings,
+        project.kv_mappings,
         event,
         ExecutionMode::DryRun,
     ))
@@ -220,8 +245,8 @@ pub fn explain(
     let routing_path = resolve_routing_path(config_path, &config.routing.file);
     let rules = load_routing(&routing_path).map_err(PipelineError::Routing)?;
     if let Some(dir) = mappings_dir {
-        let (sql, doc) = load_mappings(dir)?;
-        validate_projection_config(&config, &rules, &sql, &doc)?;
+        let (sql, doc, kv) = load_mappings(dir)?;
+        validate_projection_config(&config, &rules, &sql, &doc, &kv)?;
     }
 
     let execution_order =
@@ -265,6 +290,7 @@ pub fn replay(
         project.routing_rules,
         project.sql_mappings,
         project.doc_mappings,
+        project.kv_mappings,
     );
     Ok(ctx.run_stream_with_options(&mut iter, opts)?)
 }

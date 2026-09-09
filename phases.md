@@ -25,17 +25,17 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 11 | Entity-Aware Idempotent Insert | ✅ Completed | [phases/phase-11-entity-aware-idempotent-insert.md](phases/phase-11-entity-aware-idempotent-insert.md) |
 | 12 | Sequence-Gated Upsert (12.1–12.6) | ✅ Completed | [phases/phase-12-sequence-gated-upsert.md](phases/phase-12-sequence-gated-upsert.md) |
 | 13 | Deletion & Tombstones (13.1–13.6) | ✅ Completed | [phases/phase-13-deletion-tombstones.md](phases/phase-13-deletion-tombstones.md) |
+| 14 | Cache Adapter (Key-Value) (14.1–14.5) | ✅ Completed | [phases/phase-14-cache-adapter.md](phases/phase-14-cache-adapter.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md)
 
 ---
 
-## Beyond Phase 13
+## Beyond Phase 14
 
 Candidate future phases, not yet planned in detail:
 
-- **Phase 14** — Partial-column / field-level projection updates (per-`(entity, field-group)` sequence lanes, create-vs-update mapping taxonomy). Deferred out of Phase 12 for guard-model complexity — see that phase's Non-Goals.
-- **Phase 15** — Cache adapter (`StorageKind::KeyValue` — already routed, no adapter yet; simplest semantics, no query language — good test of whether the adapter abstraction generalizes beyond SQL/document)
-- **Phase 16** — Graph adapter
+- **Phase 15** — Partial-column / field-level projection updates (per-`(entity, field-group)` sequence lanes, create-vs-update mapping taxonomy). Deferred out of Phase 12 for guard-model complexity — see that phase's Non-Goals.
+- **Phase 16** — Graph adapter (`StorageKind::Graph` — already routed, no adapter yet)
 
-SQL (SQLite only) and Document adapters are implemented. Cache and Graph adapters — both named in the project pitch — do not exist yet.
+SQL, Document, and Key-Value (file-backed) adapters are implemented. The Graph adapter — named in the project pitch — does not exist yet.

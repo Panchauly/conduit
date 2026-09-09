@@ -92,7 +92,8 @@ fn replace_mapping_on_non_upsert_adapter_fails_validation() {
     let mut doc = HashMap::new();
     doc.insert("UserUpdated".to_string(), ignore_doc_mapping());
 
-    let err = validate_projection_config(&config, &routing(), &sql, &doc).unwrap_err();
+    let err =
+        validate_projection_config(&config, &routing(), &sql, &doc, &HashMap::new()).unwrap_err();
     assert!(
         err.to_string().contains("upsert"),
         "expected an upsert capability mismatch: {err}"
@@ -112,5 +113,5 @@ fn replace_mapping_on_declared_upsert_adapter_validates() {
     let mut doc = HashMap::new();
     doc.insert("UserUpdated".to_string(), ignore_doc_mapping());
 
-    validate_projection_config(&config, &routing(), &sql, &doc).unwrap();
+    validate_projection_config(&config, &routing(), &sql, &doc, &HashMap::new()).unwrap();
 }

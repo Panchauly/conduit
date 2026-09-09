@@ -4,6 +4,7 @@ use core::fmt;
 use std::collections::{HashMap, HashSet};
 
 use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::adapter::{OnExisting, Operation};
 use crate::routing::AdapterId;
@@ -26,6 +27,10 @@ pub enum ValidationIssue {
         event: String,
         reason: String,
     },
+    InvalidKvMapping {
+        event: String,
+        reason: String,
+    },
     UnknownAdapter {
         event_type: String,
         adapter_id: String,
@@ -35,6 +40,10 @@ pub enum ValidationIssue {
         adapter_id: String,
     },
     MissingDocumentMapping {
+        event_type: String,
+        adapter_id: String,
+    },
+    MissingKvMapping {
         event_type: String,
         adapter_id: String,
     },
@@ -55,6 +64,14 @@ pub enum ValidationIssue {
         event: String,
     },
     DocumentMappingNoFileTarget {
+        event: String,
+    },
+    /// Key-value mapping exists but event type is not in routing.
+    UnroutedKvMapping {
+        event: String,
+    },
+    /// Event is routed but no key-value adapter on the route (mapping unreachable).
+    KvMappingNoKeyValueTarget {
         event: String,
     },
     /// HashMap key must match `event` field (routing and lookups use the key).
@@ -98,6 +115,13 @@ impl fmt::Display for ValidationIssue {
                     event, reason
                 )
             }
+            ValidationIssue::InvalidKvMapping { event, reason } => {
+                write!(
+                    f,
+                    "invalid key-value mapping for event {:?}: {}",
+                    event, reason
+                )
+            }
             ValidationIssue::UnknownAdapter {
                 event_type,
                 adapter_id,
@@ -125,6 +149,16 @@ impl fmt::Display for ValidationIssue {
                 write!(
                     f,
                     "routing: event {:?} targets document adapter {:?} but no document mapping exists for that event",
+                    event_type, adapter_id
+                )
+            }
+            ValidationIssue::MissingKvMapping {
+                event_type,
+                adapter_id,
+            } => {
+                write!(
+                    f,
+                    "routing: event {:?} targets key-value adapter {:?} but no key-value mapping exists for that event",
                     event_type, adapter_id
                 )
             }
@@ -163,6 +197,20 @@ impl fmt::Display for ValidationIssue {
                 write!(
                     f,
                     "document mapping for event {:?} has no file adapter on its route",
+                    event
+                )
+            }
+            ValidationIssue::UnroutedKvMapping { event } => {
+                write!(
+                    f,
+                    "key-value mapping for event {:?} is never routed (add route or remove mapping)",
+                    event
+                )
+            }
+            ValidationIssue::KvMappingNoKeyValueTarget { event } => {
+                write!(
+                    f,
+                    "key-value mapping for event {:?} has no key-value adapter on its route",
                     event
                 )
             }
@@ -299,6 +347,10 @@ fn is_sqlite(a: &AdapterConfig) -> bool {
 
 fn is_file(a: &AdapterConfig) -> bool {
     matches!(a, AdapterConfig::File(_))
+}
+
+fn is_keyvalue(a: &AdapterConfig) -> bool {
+    matches!(a, AdapterConfig::KeyValue(_))
 }
 
 /// When unset or empty, adapter is treated as declaring only `Write`.
@@ -445,6 +497,7 @@ pub fn validate_projection_config(
     routing: &HashMap<String, Vec<AdapterId>>,
     sql: &HashMap<String, SqlMapping>,
     doc: &HashMap<String, DocumentMapping>,
+    kv: &HashMap<String, KvMapping>,
 ) -> Result<(), ValidationReport> {
     let mut report = ValidationReport::default();
     let adapters_by_id = build_adapter_by_id(config, &mut report);
@@ -580,6 +633,56 @@ pub fn validate_projection_config(
         }
     }
 
+    for (key, m) in kv {
+        if key != m.event.as_str() {
+            report.push(ValidationIssue::MappingKeyMismatch {
+                map_key: key.clone(),
+                event_field: m.event.clone(),
+                kind: "key-value",
+            });
+        }
+        if m.event.trim().is_empty() {
+            report.push(ValidationIssue::InvalidKvMapping {
+                event: key.clone(),
+                reason: "empty event".into(),
+            });
+        } else if m.namespace.trim().is_empty() {
+            report.push(ValidationIssue::InvalidKvMapping {
+                event: key.clone(),
+                reason: "empty namespace".into(),
+            });
+        } else if m.key.trim().is_empty() {
+            report.push(ValidationIssue::InvalidKvMapping {
+                event: key.clone(),
+                reason: "empty key".into(),
+            });
+        } else if !(m.key.starts_with("payload.") || m.key.starts_with("metadata.")) {
+            // Phase 11.1: `key` is resolved the same way as a `value` leaf;
+            // catch a malformed entity-identity path at startup, not mid-run.
+            report.push(ValidationIssue::InvalidKvMapping {
+                event: key.clone(),
+                reason: format!("key {:?} must be a 'payload.' or 'metadata.' path", m.key),
+            });
+        } else if m.operation == Operation::Upsert && document_template_empty(&m.value) {
+            report.push(ValidationIssue::InvalidKvMapping {
+                event: key.clone(),
+                reason: "value template must not be empty (null, {}, or [])".into(),
+            });
+        } else if m.operation == Operation::Delete && !document_template_empty(&m.value) {
+            // Phase 13.1: a delete mapping resolves only the entity key — no
+            // hidden projection body.
+            report.push(ValidationIssue::InvalidKvMapping {
+                event: key.clone(),
+                reason: "delete mapping's value must be empty (null, {}, or [])".into(),
+            });
+        } else if m.version < 1 {
+            report.push(ValidationIssue::InvalidKvMapping {
+                event: key.clone(),
+                reason: "version must be >= 1".into(),
+            });
+        }
+    }
+
     for (event_type, adapter_ids) in routing {
         for adapter_id in adapter_ids {
             let Some(ac) = adapters_by_id.get(adapter_id.as_str()).copied() else {
@@ -634,6 +737,28 @@ pub fn validate_projection_config(
                         missing,
                     });
                 }
+            } else if is_keyvalue(ac) {
+                let Some(kv_map) = kv.get(event_type) else {
+                    report.push(ValidationIssue::MissingKvMapping {
+                        event_type: event_type.clone(),
+                        adapter_id: adapter_id.clone(),
+                    });
+                    continue;
+                };
+                let eff = effective_capabilities(ac);
+                let required = required_capabilities(
+                    &kv_map.requires_capabilities,
+                    kv_map.on_existing,
+                    kv_map.operation,
+                );
+                let missing: Vec<_> = required.into_iter().filter(|c| !eff.contains(c)).collect();
+                if !missing.is_empty() {
+                    report.push(ValidationIssue::CapabilityMismatch {
+                        event_type: event_type.clone(),
+                        adapter_id: adapter_id.clone(),
+                        missing,
+                    });
+                }
             }
         }
     }
@@ -675,6 +800,27 @@ pub fn validate_projection_config(
         });
         if !has_file {
             report.push(ValidationIssue::DocumentMappingNoFileTarget {
+                event: event.clone(),
+            });
+        }
+    }
+
+    for event in kv.keys() {
+        let Some(ids) = routing.get(event) else {
+            report.push(ValidationIssue::UnroutedKvMapping {
+                event: event.clone(),
+            });
+            continue;
+        };
+        let has_keyvalue = ids.iter().any(|id| {
+            adapters_by_id
+                .get(id.as_str())
+                .copied()
+                .map(is_keyvalue)
+                .unwrap_or(false)
+        });
+        if !has_keyvalue {
+            report.push(ValidationIssue::KvMappingNoKeyValueTarget {
                 event: event.clone(),
             });
         }
