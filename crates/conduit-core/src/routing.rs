@@ -32,17 +32,20 @@ impl fmt::Display for StorageKind {
     }
 }
 
-static ROUTING_RULES: Lazy<Result<HashMap<String, Vec<AdapterId>>, RuntimeError>> = Lazy::new(|| {
-    let path = std::env::var("ROUTING_CONFIG").unwrap_or_else(|_| "routing.json".to_string());
+static ROUTING_RULES: Lazy<Result<HashMap<String, Vec<AdapterId>>, RuntimeError>> =
+    Lazy::new(|| {
+        let path = std::env::var("ROUTING_CONFIG").unwrap_or_else(|_| "routing.json".to_string());
 
-    let data = fs::read_to_string(&path)
-        .map_err(|e| RuntimeError::RoutingConfigUnreadable(format!("{}: {}", path, e)))?;
+        let data = fs::read_to_string(&path)
+            .map_err(|e| RuntimeError::RoutingConfigUnreadable(format!("{}: {}", path, e)))?;
 
-    serde_json::from_str(&data).map_err(|e| RuntimeError::RoutingConfigInvalid(format!("{}: {}", path, e)))
-});
+        serde_json::from_str(&data)
+            .map_err(|e| RuntimeError::RoutingConfigInvalid(format!("{}: {}", path, e)))
+    });
 
 /// Global routing table (cwd/env dependent). Used by [crate::dispatch::dispatch].
-pub(crate) fn global_routing_table() -> Result<&'static HashMap<String, Vec<AdapterId>>, RuntimeError> {
+pub(crate) fn global_routing_table()
+-> Result<&'static HashMap<String, Vec<AdapterId>>, RuntimeError> {
     ROUTING_RULES.as_ref().map_err(Clone::clone)
 }
 
@@ -55,14 +58,8 @@ pub fn route(event: &Event) -> Result<Vec<AdapterId>, RuntimeError> {
 ///
 /// One event type may list several distinct adapters (e.g. `pgsql_master`, `pgsql_slave`); each
 /// receives the same logical projection via shared mappings, with execution order by adapter priority.
-pub fn route_with_rules(
-    event: &Event,
-    rules: &HashMap<String, Vec<AdapterId>>,
-) -> Vec<AdapterId> {
-    rules
-        .get(&event.event_type)
-        .cloned()
-        .unwrap_or_default()
+pub fn route_with_rules(event: &Event, rules: &HashMap<String, Vec<AdapterId>>) -> Vec<AdapterId> {
+    rules.get(&event.event_type).cloned().unwrap_or_default()
 }
 
 /// Explicit loader (used at startup / tests)

@@ -4,13 +4,17 @@ use std::time::SystemTime;
 use crate::adapter::StorageAdapter;
 use crate::event::Event;
 use crate::execution::{AdapterExecutionReport, AdapterReportError, ExecutionReport};
-use crate::routing::{route_with_rules, AdapterId, StorageKind};
+use crate::routing::{AdapterId, StorageKind, route_with_rules};
 use crate::runtime::config::FailurePolicy;
 use crate::runtime::dependency_graph::{
-    execution_order_for_routed, AdapterExecutionMeta, DependencyOrderError,
+    AdapterExecutionMeta, DependencyOrderError, execution_order_for_routed,
 };
 
-fn dependency_order_failure_report(event: &Event, started_at: SystemTime, message: String) -> ExecutionReport {
+fn dependency_order_failure_report(
+    event: &Event,
+    started_at: SystemTime,
+    message: String,
+) -> ExecutionReport {
     let trace_id = format!("trace-{}", event.id());
     let mut report = ExecutionReport::new(
         event.id().to_string(),
@@ -19,15 +23,9 @@ fn dependency_order_failure_report(event: &Event, started_at: SystemTime, messag
         started_at,
     )
     .with_source_version(event.version());
-    let adapter_report = AdapterExecutionReport::new(
-        "_dispatch".to_string(),
-        StorageKind::Sql,
-        started_at,
-    )
-    .finish_failure(
-        started_at,
-        AdapterReportError::WriteFailed { message },
-    );
+    let adapter_report =
+        AdapterExecutionReport::new("_dispatch".to_string(), StorageKind::Sql, started_at)
+            .finish_failure(started_at, AdapterReportError::WriteFailed { message });
     report.push_adapter_report(adapter_report);
     report.finish(started_at)
 }
@@ -48,13 +46,7 @@ pub fn dispatch(
             );
         }
     };
-    dispatch_with_routing(
-        event,
-        adapters,
-        failure_policy,
-        routing_rules,
-        adapter_meta,
-    )
+    dispatch_with_routing(event, adapters, failure_policy, routing_rules, adapter_meta)
 }
 
 /// Dispatch using explicit routing rules (replay, tests) instead of global routing.
@@ -89,20 +81,14 @@ pub(crate) fn dispatch_with_routing(
             return dependency_order_failure_report(
                 event,
                 started_at,
-                format!(
-                    "cyclic adapter dependencies among: {}",
-                    adapters.join(", ")
-                ),
+                format!("cyclic adapter dependencies among: {}", adapters.join(", ")),
             );
         }
         Err(DependencyOrderError::MissingAdapterMeta { adapter_id }) => {
             return dependency_order_failure_report(
                 event,
                 started_at,
-                format!(
-                    "no adapter metadata for routed id {:?}",
-                    adapter_id
-                ),
+                format!("no adapter metadata for routed id {:?}", adapter_id),
             );
         }
     };

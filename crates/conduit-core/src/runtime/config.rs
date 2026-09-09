@@ -211,7 +211,10 @@ impl fmt::Display for ConfigError {
             ConfigError::SelfDependency(id) => {
                 write!(f, "adapter {:?} cannot depend on itself", id)
             }
-            ConfigError::UnknownDependency { adapter, dependency } => {
+            ConfigError::UnknownDependency {
+                adapter,
+                dependency,
+            } => {
                 write!(
                     f,
                     "adapter {:?} depends on unknown adapter {:?}",

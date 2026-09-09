@@ -1,9 +1,9 @@
 //! Phase 10.4: fail-fast error reporting when an upcaster chain is broken.
 
-use conduit_core::upcast::{Upcaster, UpcastError, UpcasterRegistry};
-use serde_json::{json, Value};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use conduit_core::upcast::{UpcastError, Upcaster, UpcasterRegistry};
+use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Counts invocations so a broken chain further along can be proven to never run.
 struct CountingUpcaster {
@@ -91,10 +91,7 @@ fn completely_unregistered_event_type_fails_fast() {
 
     assert!(matches!(
         err,
-        UpcastError::MissingLink {
-            missing_at: 1,
-            ..
-        }
+        UpcastError::MissingLink { missing_at: 1, .. }
     ));
 }
 

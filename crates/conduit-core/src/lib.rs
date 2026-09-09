@@ -32,22 +32,22 @@ pub use execution::{
 };
 
 /// Phase 10.2 upcaster registry for schema evolution.
-pub use upcast::{Upcaster, UpcastError, UpcasterRegistry};
+pub use upcast::{UpcastError, Upcaster, UpcasterRegistry};
 
 /// Phase 7 replay API.
 pub use replay::{
-    events_from_path, replay_stream, replay_stream_with_options, EventsFromPath,
-    PerEventReplaySummary, ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptions,
+    EventsFromPath, PerEventReplaySummary, ReplayContext, ReplayLoadError, ReplayReport,
+    ReplayRunOptions, events_from_path, replay_stream, replay_stream_with_options,
 };
 
 /// Phase 8 projection validation.
 pub use runtime::{
-    adapter_metadata_map, dependency_depth_exceeds_recommended, dependency_layers_grouped,
-    dependency_layers_parallel, execution_order_for_routed, max_dependency_layer,
-    validate_projection_config, validate_routing_adapter_ids,
-    validate_routing_and_dependencies_for_event_type, validate_routing_for_event_type,
-    AdapterExecutionMeta, ValidationIssue, ValidationReport,
-    PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING, RECOMMENDED_MAX_DEPENDENCY_LAYER,
+    AdapterExecutionMeta, PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING,
+    RECOMMENDED_MAX_DEPENDENCY_LAYER, ValidationIssue, ValidationReport, adapter_metadata_map,
+    dependency_depth_exceeds_recommended, dependency_layers_grouped, dependency_layers_parallel,
+    execution_order_for_routed, max_dependency_layer, validate_projection_config,
+    validate_routing_adapter_ids, validate_routing_and_dependencies_for_event_type,
+    validate_routing_for_event_type,
 };
 
 /// Execution report types (also at [crate root](crate) for convenience).
@@ -105,12 +105,7 @@ pub fn execute_event_with_upcasters(
     let mut adapters =
         build_adapters_from_config(config, sql_mappings, document_mappings, upcasters);
     let adapter_meta = crate::runtime::adapter_metadata_map(config);
-    dispatch(
-        &event,
-        &mut adapters,
-        config.failure_policy,
-        &adapter_meta,
-    )
+    dispatch(&event, &mut adapters, config.failure_policy, &adapter_meta)
 }
 
 /// Execute a single event with an explicit [ExecutionMode] (e.g. [execution::ExecutionMode::DryRun] for no-write simulation).
@@ -135,12 +130,7 @@ pub fn execute_event_with_mode(
                 Arc::new(UpcasterRegistry::new()),
             );
             let adapter_meta = crate::runtime::adapter_metadata_map(config);
-            dispatch(
-                &event,
-                &mut adapters,
-                config.failure_policy,
-                &adapter_meta,
-            )
+            dispatch(&event, &mut adapters, config.failure_policy, &adapter_meta)
         }
     }
 }

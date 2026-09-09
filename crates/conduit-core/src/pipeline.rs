@@ -16,14 +16,14 @@ use crate::adapter::sql::mapping::SqlMapping;
 use crate::event::Event;
 use crate::execution::{ExecutionMode, ExecutionReport};
 use crate::replay::{
-    events_from_path, ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptions,
+    ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptions, events_from_path,
 };
-use crate::routing::{load_routing, route_with_rules, AdapterId};
+use crate::routing::{AdapterId, load_routing, route_with_rules};
 use crate::runtime::config::{ConduitConfig, ConfigError};
 use crate::runtime::{
-    adapter_metadata_map, dependency_depth_exceeds_recommended, dependency_layers_grouped,
-    dependency_layers_parallel, validate_projection_config,
-    validate_routing_and_dependencies_for_event_type, ValidationReport,
+    ValidationReport, adapter_metadata_map, dependency_depth_exceeds_recommended,
+    dependency_layers_grouped, dependency_layers_parallel, validate_projection_config,
+    validate_routing_and_dependencies_for_event_type,
 };
 use crate::{execute_event, execute_event_with_mode};
 
@@ -116,7 +116,10 @@ pub fn load_config(path: &Path) -> Result<ConduitConfig, PipelineError> {
 }
 
 /// SQL and document mapping tables keyed by event type.
-pub type LoadedMappings = (HashMap<String, SqlMapping>, HashMap<String, DocumentMapping>);
+pub type LoadedMappings = (
+    HashMap<String, SqlMapping>,
+    HashMap<String, DocumentMapping>,
+);
 
 /// Load SQL and document mappings from `<mappings_dir>/sql` and `<mappings_dir>/document`.
 pub fn load_mappings(mappings_dir: &Path) -> Result<LoadedMappings, PipelineError> {
@@ -141,7 +144,10 @@ pub struct LoadedProject {
 }
 
 /// Load config, mappings, and routing, then run Phase 8 cross-validation.
-pub fn load_project(config_path: &Path, mappings_dir: &Path) -> Result<LoadedProject, PipelineError> {
+pub fn load_project(
+    config_path: &Path,
+    mappings_dir: &Path,
+) -> Result<LoadedProject, PipelineError> {
     let config = load_config(config_path)?;
     let (sql_mappings, doc_mappings) = load_mappings(mappings_dir)?;
     let routing_path = resolve_routing_path(config_path, &config.routing.file);

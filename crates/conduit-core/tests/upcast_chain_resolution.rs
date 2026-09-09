@@ -1,7 +1,7 @@
 //! Phase 10.4: multi-step upcaster chain resolution (V1 -> V2 -> V3).
 
 use conduit_core::upcast::{Upcaster, UpcasterRegistry};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// v1 -> v2: a bare `{"id"}` payload gains a default `email`.
 struct AddEmail;

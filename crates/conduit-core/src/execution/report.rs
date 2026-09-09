@@ -312,8 +312,12 @@ mod tests {
         let started = SystemTime::now();
         let finished = started + Duration::from_millis(250);
 
-        let mut report =
-            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started);
+        let mut report = ExecutionReport::new(
+            "e".to_string(),
+            "T".to_string(),
+            "trace".to_string(),
+            started,
+        );
         report.push_adapter_report(
             AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
                 .finish_success(finished),
@@ -330,8 +334,12 @@ mod tests {
         let started = SystemTime::now();
         let finished = started + Duration::from_millis(10);
 
-        let mut report =
-            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started);
+        let mut report = ExecutionReport::new(
+            "e".to_string(),
+            "T".to_string(),
+            "trace".to_string(),
+            started,
+        );
         report.push_adapter_report(
             AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
                 .finish_success(finished),
@@ -355,9 +363,13 @@ mod tests {
         let started = SystemTime::now();
         let finished = started + Duration::from_millis(10);
 
-        let mut report =
-            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started)
-                .with_source_version(1);
+        let mut report = ExecutionReport::new(
+            "e".to_string(),
+            "T".to_string(),
+            "trace".to_string(),
+            started,
+        )
+        .with_source_version(1);
         report.push_adapter_report(
             AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
                 .with_versions(Some(1), Some(2))
@@ -384,15 +396,20 @@ mod tests {
     fn finish_failure_with_skipped_error_does_not_fail_overall_status() {
         let started = SystemTime::now();
 
-        let mut report =
-            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started);
-        let adapter = AdapterExecutionReport::new("doc".to_string(), StorageKind::Document, started)
-            .finish_failure(
-                started,
-                AdapterReportError::Skipped {
-                    message: "already applied".to_string(),
-                },
-            );
+        let mut report = ExecutionReport::new(
+            "e".to_string(),
+            "T".to_string(),
+            "trace".to_string(),
+            started,
+        );
+        let adapter =
+            AdapterExecutionReport::new("doc".to_string(), StorageKind::Document, started)
+                .finish_failure(
+                    started,
+                    AdapterReportError::Skipped {
+                        message: "already applied".to_string(),
+                    },
+                );
 
         assert_eq!(adapter.outcome, AdapterOutcome::Skipped);
 
@@ -407,9 +424,13 @@ mod tests {
         let started = SystemTime::now();
         let finished = started - Duration::from_millis(50);
 
-        let report =
-            ExecutionReport::new("e".to_string(), "T".to_string(), "trace".to_string(), started)
-                .finish(finished);
+        let report = ExecutionReport::new(
+            "e".to_string(),
+            "T".to_string(),
+            "trace".to_string(),
+            started,
+        )
+        .finish(finished);
 
         assert_eq!(report.duration_ms, None);
         assert_eq!(report.finished_at, Some(finished));
