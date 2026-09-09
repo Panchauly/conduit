@@ -137,6 +137,7 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
         routing_rules.clone(),
         sql_mappings.clone(),
         HashMap::new(),
+        HashMap::new(),
     );
     let mut iter = events_from_path(&events_dir).unwrap();
     let report = ctx.run_stream(&mut iter).unwrap();
@@ -185,7 +186,13 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
     }
 
     for event in create_then_update_events() {
-        let report = execute_event(&live_config, sql_mappings.clone(), HashMap::new(), event);
+        let report = execute_event(
+            &live_config,
+            sql_mappings.clone(),
+            HashMap::new(),
+            HashMap::new(),
+            event,
+        );
         assert_eq!(
             report.status,
             conduit_core::execution::ExecutionStatus::Succeeded,

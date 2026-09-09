@@ -9,5 +9,9 @@
   "FailingEvent": [
     "sql-primary",
     "doc-readmodel"
+  ],
+  "UserCacheSynced": [
+    "sql-primary",
+    "kv-cache"
   ]
 }

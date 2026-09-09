@@ -12,7 +12,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{
-    adapter::{document::mapping::DocumentMapping, sql::mapping::SqlMapping},
+    adapter::{
+        document::mapping::DocumentMapping, keyvalue::mapping::KvMapping, sql::mapping::SqlMapping,
+    },
     dispatch::dispatch,
     event::Event,
     runtime::{build_adapters_from_config, config::ConduitConfig},
@@ -82,12 +84,14 @@ pub fn execute_event(
     config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
+    kv_mappings: HashMap<String, KvMapping>,
     event: Event,
 ) -> ExecutionReport {
     execute_event_with_upcasters(
         config,
         sql_mappings,
         document_mappings,
+        kv_mappings,
         event,
         Arc::new(UpcasterRegistry::new()),
     )
@@ -99,11 +103,17 @@ pub fn execute_event_with_upcasters(
     config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
+    kv_mappings: HashMap<String, KvMapping>,
     event: Event,
     upcasters: Arc<UpcasterRegistry>,
 ) -> ExecutionReport {
-    let mut adapters =
-        build_adapters_from_config(config, sql_mappings, document_mappings, upcasters);
+    let mut adapters = build_adapters_from_config(
+        config,
+        sql_mappings,
+        document_mappings,
+        kv_mappings,
+        upcasters,
+    );
     let adapter_meta = crate::runtime::adapter_metadata_map(config);
     dispatch(&event, &mut adapters, config.failure_policy, &adapter_meta)
 }
@@ -115,18 +125,20 @@ pub fn execute_event_with_mode(
     config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
+    kv_mappings: HashMap<String, KvMapping>,
     event: Event,
     mode: crate::execution::ExecutionMode,
 ) -> ExecutionReport {
     match mode {
         crate::execution::ExecutionMode::Run => {
-            execute_event(config, sql_mappings, document_mappings, event)
+            execute_event(config, sql_mappings, document_mappings, kv_mappings, event)
         }
         crate::execution::ExecutionMode::DryRun => {
             let mut adapters = build_adapters_from_config(
                 config,
                 sql_mappings,
                 document_mappings,
+                kv_mappings,
                 Arc::new(UpcasterRegistry::new()),
             );
             let adapter_meta = crate::runtime::adapter_metadata_map(config);

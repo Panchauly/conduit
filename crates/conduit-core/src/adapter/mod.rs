@@ -1,4 +1,5 @@
 pub mod document;
+pub mod keyvalue;
 pub mod sql;
 
 use core::fmt;

@@ -144,6 +144,9 @@ pub enum AdapterConfig {
 
     #[serde(rename = "file")]
     File(FileAdapterConfig),
+
+    #[serde(rename = "keyvalue")]
+    KeyValue(KeyValueAdapterConfig),
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +186,26 @@ pub struct FileAdapterConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct FileConfig {
+    pub root: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KeyValueAdapterConfig {
+    pub id: String,
+    pub priority: u32,
+    pub config: KeyValueConfig,
+
+    /// Optional declared capabilities (Phase 6.4).
+    #[serde(default)]
+    pub capabilities: Option<AdapterCapabilities>,
+
+    /// Adapters that must run before this one (Phase 9); must be on the same route for each event.
+    #[serde(default)]
+    pub depends_on: Vec<AdapterId>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KeyValueConfig {
     pub root: String,
 }
 
@@ -239,6 +262,7 @@ impl AdapterConfig {
         match self {
             AdapterConfig::Sqlite(cfg) => &cfg.id,
             AdapterConfig::File(cfg) => &cfg.id,
+            AdapterConfig::KeyValue(cfg) => &cfg.id,
         }
     }
 
@@ -246,6 +270,7 @@ impl AdapterConfig {
         match self {
             AdapterConfig::Sqlite(cfg) => cfg.priority,
             AdapterConfig::File(cfg) => cfg.priority,
+            AdapterConfig::KeyValue(cfg) => cfg.priority,
         }
     }
 
@@ -254,6 +279,7 @@ impl AdapterConfig {
         match self {
             AdapterConfig::Sqlite(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::File(cfg) => cfg.capabilities.as_deref(),
+            AdapterConfig::KeyValue(cfg) => cfg.capabilities.as_deref(),
         }
     }
 
@@ -261,6 +287,7 @@ impl AdapterConfig {
         match self {
             AdapterConfig::Sqlite(cfg) => &cfg.depends_on,
             AdapterConfig::File(cfg) => &cfg.depends_on,
+            AdapterConfig::KeyValue(cfg) => &cfg.depends_on,
         }
     }
 }

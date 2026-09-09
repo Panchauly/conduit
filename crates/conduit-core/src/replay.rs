@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::dispatch::dispatch_with_routing;
 use crate::event::Event;
@@ -294,12 +295,14 @@ impl ReplayContext {
         routing_rules: HashMap<String, Vec<AdapterId>>,
         sql_mappings: HashMap<String, SqlMapping>,
         document_mappings: HashMap<String, DocumentMapping>,
+        kv_mappings: HashMap<String, KvMapping>,
     ) -> Self {
         Self::new_with_upcasters(
             config,
             routing_rules,
             sql_mappings,
             document_mappings,
+            kv_mappings,
             std::sync::Arc::new(crate::upcast::UpcasterRegistry::new()),
         )
     }
@@ -310,6 +313,7 @@ impl ReplayContext {
         routing_rules: HashMap<String, Vec<AdapterId>>,
         sql_mappings: HashMap<String, SqlMapping>,
         document_mappings: HashMap<String, DocumentMapping>,
+        kv_mappings: HashMap<String, KvMapping>,
         upcasters: std::sync::Arc<crate::upcast::UpcasterRegistry>,
     ) -> Self {
         Self {
@@ -317,6 +321,7 @@ impl ReplayContext {
                 config,
                 sql_mappings,
                 document_mappings,
+                kv_mappings,
                 upcasters,
             ),
             failure_policy: config.failure_policy,
@@ -407,6 +412,7 @@ pub fn replay_stream(
     routing_rules: HashMap<String, Vec<AdapterId>>,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
+    kv_mappings: HashMap<String, KvMapping>,
     events: impl Iterator<Item = Result<Event, ReplayLoadError>>,
 ) -> Result<ReplayReport, ReplayLoadError> {
     replay_stream_with_options(
@@ -414,6 +420,7 @@ pub fn replay_stream(
         routing_rules,
         sql_mappings,
         document_mappings,
+        kv_mappings,
         events,
         &ReplayRunOptions::default(),
     )
@@ -424,10 +431,17 @@ pub fn replay_stream_with_options(
     routing_rules: HashMap<String, Vec<AdapterId>>,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
+    kv_mappings: HashMap<String, KvMapping>,
     events: impl Iterator<Item = Result<Event, ReplayLoadError>>,
     opts: &ReplayRunOptions,
 ) -> Result<ReplayReport, ReplayLoadError> {
-    let mut ctx = ReplayContext::new(config, routing_rules, sql_mappings, document_mappings);
+    let mut ctx = ReplayContext::new(
+        config,
+        routing_rules,
+        sql_mappings,
+        document_mappings,
+        kv_mappings,
+    );
     ctx.run_stream_with_options(events, opts)
 }
 
