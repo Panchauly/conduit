@@ -24,17 +24,18 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 10 | Projection Versioning & Schema Evolution (10.1–10.4) | ✅ Completed | [phases/phase-10-versioning-schema-evolution.md](phases/phase-10-versioning-schema-evolution.md) |
 | 11 | Entity-Aware Idempotent Insert | ✅ Completed | [phases/phase-11-entity-aware-idempotent-insert.md](phases/phase-11-entity-aware-idempotent-insert.md) |
 | 12 | Sequence-Gated Upsert (12.1–12.6) | ✅ Completed | [phases/phase-12-sequence-gated-upsert.md](phases/phase-12-sequence-gated-upsert.md) |
+| 13 | Deletion & Tombstones (13.1–13.6) | 🎯 Planned | [phases/phase-13-deletion-tombstones.md](phases/phase-13-deletion-tombstones.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md)
 
 ---
 
-## Beyond Phase 12
+## Beyond Phase 13
 
 Candidate future phases, not yet planned in detail:
 
-- **Phase 13** — Partial-column / field-level projection updates (per-`(entity, field-group)` sequence lanes, create-vs-update mapping taxonomy). Deferred out of Phase 12 for guard-model complexity — see that phase's Non-Goals.
-- **Phase 14** — Cache adapter (simplest semantics, no query language — good test of whether the adapter abstraction generalizes beyond SQL/document)
-- **Phase 15** — Graph adapter
+- **Phase 14** — Partial-column / field-level projection updates (per-`(entity, field-group)` sequence lanes, create-vs-update mapping taxonomy). Deferred out of Phase 12 for guard-model complexity — see that phase's Non-Goals.
+- **Phase 15** — Cache adapter (`StorageKind::KeyValue` — already routed, no adapter yet; simplest semantics, no query language — good test of whether the adapter abstraction generalizes beyond SQL/document)
+- **Phase 16** — Graph adapter
 
 SQL (SQLite only) and Document adapters are implemented. Cache and Graph adapters — both named in the project pitch — do not exist yet.
