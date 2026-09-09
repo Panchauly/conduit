@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use super::adapter::SqlError;
-use crate::adapter::{OnExisting, is_identity_scalar};
+use crate::adapter::{OnExisting, Operation, is_identity_scalar};
 use crate::event::Event;
 use crate::runtime::config::AdapterCapability;
 use serde_json::Value;
@@ -62,9 +62,24 @@ pub struct SqlMapping {
 
     /// Write mode for an entity that already has a projected row (Phase
     /// 12.2). Defaults to `ignore` — every mapping written before Phase 12
-    /// keeps its Phase 11 behavior unchanged.
+    /// keeps its Phase 11 behavior unchanged. Read only when `operation:
+    /// upsert` (Phase 13.1).
     #[serde(default)]
     pub on_existing: OnExisting,
+
+    /// What this mapping does: create/update the entity, or remove it (Phase
+    /// 13.1). Defaults to `upsert` — every mapping written before Phase 13
+    /// keeps its Phase 11/12 behavior unchanged. A `delete` mapping's
+    /// `columns` must contain exactly the `primary_key` column(s) — no
+    /// projection body, it only resolves the entity to remove.
+    #[serde(default)]
+    pub operation: Operation,
+
+    /// `operation: delete` only (Phase 13.4): this tombstone rejects every
+    /// later event for this key, forever — no resurrection. Ignored for
+    /// `operation: upsert`.
+    #[serde(default)]
+    pub permanent: bool,
 
     /// Capabilities adapters must provide to run this projection (enum; parse-time validated).
     #[serde(default)]

@@ -57,6 +57,9 @@ pub enum AdapterCapability {
 
     /// Adapter supports transactional boundaries.
     Transactions,
+
+    /// Adapter supports removing a projected entity (Phase 13).
+    Delete,
 }
 
 /// Declared capabilities of an adapter.

@@ -33,16 +33,19 @@ pub enum ExecutionMode {
     DryRun,
 }
 
-/// Outcome of a single adapter invocation (Phase 12.1). `Skipped` carries the
-/// machine-readable [`SkipReason`] directly — no more string-sniffing a
-/// message to tell an idempotent skip from a stale-sequence rejection.
+/// Outcome of a single adapter invocation (Phase 12.1; extended Phase 13.1
+/// with `Deleted`). `Skipped` carries the machine-readable [`SkipReason`]
+/// directly — no more string-sniffing a message to tell an idempotent skip
+/// from a stale-sequence rejection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum AdapterOutcome {
-    /// A new entity was written.
+    /// A new entity was written (creation, or a resurrection — Phase 13.4).
     Created,
     /// An existing entity was overwritten (`on_existing: replace` only, Phase 12).
     Updated,
+    /// The entity was removed and its tombstone recorded (Phase 13.2/13.3).
+    Deleted,
     /// Nothing was written; see `reason`.
     Skipped { reason: SkipReason },
     /// The adapter failed; see the sibling `error` field for detail.
@@ -261,6 +264,13 @@ impl AdapterExecutionReport {
     pub fn finish_updated(mut self, finished_at: SystemTime) -> Self {
         self.finish_at(finished_at);
         self.outcome = AdapterOutcome::Updated;
+        self
+    }
+
+    /// Finish: the entity was removed and its tombstone recorded (Phase 13.2/13.3).
+    pub fn finish_deleted(mut self, finished_at: SystemTime) -> Self {
+        self.finish_at(finished_at);
+        self.outcome = AdapterOutcome::Deleted;
         self
     }
 

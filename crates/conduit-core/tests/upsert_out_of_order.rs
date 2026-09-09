@@ -127,7 +127,7 @@ document:
         assert!(result.is_success(), "seq {sequence}: {:?}", result.outcome);
     }
 
-    let content = std::fs::read_to_string(root.join("UserUpdated").join("u1.json"))?;
+    let content = std::fs::read_to_string(root.join("users").join("u1.json"))?;
     assert!(
         content.contains("\"s3\""),
         "final document must carry the state from the highest sequence: {content}"

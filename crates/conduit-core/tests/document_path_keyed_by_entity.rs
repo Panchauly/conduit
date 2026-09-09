@@ -1,5 +1,6 @@
 //! Phase 11.1/11.3: the document adapter's output path is
-//! `root/{event_type}/{entity_id}.json` — a behavior change from the prior
+//! `root/{collection}/{entity_id}.json` (re-keyed from `{event_type}` to
+//! `{collection}` in Phase 13.3) — a behavior change from the prior
 //! `root/{event_type}/{event_id}.json` (Phase 3/4). Confirms the file (and the
 //! idempotency guard) are keyed by entity, not by the delivering event.
 
@@ -58,10 +59,8 @@ document:
     let result = adapter.handle(&event);
     assert!(result.is_success(), "{:?}", result.outcome);
 
-    let by_entity = root.join("UserCreated").join("entity-42.json");
-    let by_event = root
-        .join("UserCreated")
-        .join("evt-completely-unrelated.json");
+    let by_entity = root.join("users").join("entity-42.json");
+    let by_event = root.join("users").join("evt-completely-unrelated.json");
     assert!(
         by_entity.exists(),
         "output must be written at the entity-keyed path"
@@ -74,7 +73,7 @@ document:
     let guard_by_entity = root
         .join(".conduit")
         .join("entities")
-        .join("UserCreated")
+        .join("users")
         .join("entity-42.done");
     let guard_by_event = root
         .join(".conduit")

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::adapter::SqlError;
 use super::mapping::SqlMapping;
-use crate::adapter::OnExisting;
+use crate::adapter::{OnExisting, Operation};
 use crate::event::Event;
 use crate::upcast::UpcasterRegistry;
 
@@ -18,12 +18,24 @@ pub struct SqlProjection {
     /// one. One encoding path for both cases, so a single-column key never
     /// collides with a differently-split composite key.
     pub entity_key: String,
+    /// The resolved `primary_key` value(s), in declared order, *not*
+    /// JSON-array-encoded — Phase 13.2's `DELETE FROM <table> WHERE <col> = ?
+    /// [AND <col> = ? …]` binds these directly, one per `primary_key` column.
+    pub key_values: Vec<serde_json::Value>,
+    /// `primary_key` column name(s), in declared order — paired positionally
+    /// with `key_values` to build the Phase 13.2 `DELETE` statement.
+    pub primary_key_columns: Vec<String>,
     /// Target table name, carried alongside `entity_key` as the other half of
     /// the Phase 11.2 guard key (`conduit_projection_state` is keyed per table).
     pub table: String,
     /// The mapping's write mode (Phase 12.2) — governs the gated
-    /// insert/update/skip decision in the adapter.
+    /// insert/update/skip decision in the adapter. Read only when `operation:
+    /// upsert` (Phase 13.1).
     pub on_existing: OnExisting,
+    /// What this mapping does — create/update, or remove (Phase 13.1).
+    pub operation: Operation,
+    /// `operation: delete` only (Phase 13.4): mark the tombstone permanent.
+    pub permanent: bool,
 }
 
 /// Owned SQL builder used inside adapters
@@ -63,8 +75,12 @@ impl SqlRuntimeBuilder {
                 source_version,
                 projected_version,
                 entity_key: encode_entity_key(&key_values)?,
+                primary_key_columns: mapping.primary_key.iter().cloned().collect(),
+                key_values,
                 table: mapping.table.clone(),
                 on_existing: mapping.on_existing,
+                operation: mapping.operation,
+                permanent: mapping.permanent,
             });
         }
 
@@ -100,8 +116,12 @@ impl SqlRuntimeBuilder {
             source_version,
             projected_version,
             entity_key: encode_entity_key(&key_values)?,
+            primary_key_columns: mapping.primary_key.iter().cloned().collect(),
+            key_values,
             table: mapping.table.clone(),
             on_existing: mapping.on_existing,
+            operation: mapping.operation,
+            permanent: mapping.permanent,
         })
     }
 }

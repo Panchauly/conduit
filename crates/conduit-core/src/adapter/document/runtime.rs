@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::adapter::DocumentError;
 use super::mapping::DocumentMapping;
-use crate::adapter::OnExisting;
+use crate::adapter::{OnExisting, Operation};
 use crate::event::Event;
 use crate::upcast::UpcasterRegistry;
 
@@ -14,9 +14,19 @@ pub struct DocumentProjection {
     /// Resolved entity identity (Phase 11.1) — keys the idempotency guard and
     /// the output filename (Phase 11.3), rather than `event.event_id`.
     pub entity_id: String,
+    /// The mapping's stable target identity (Phase 13.3) — output path and
+    /// guard are keyed by this, not `event.event_type`, so a delete event
+    /// (its own event type) still points at the same entity file as its
+    /// create event.
+    pub collection: String,
     /// The mapping's write mode (Phase 12.2) — governs the gated
-    /// insert/update/skip decision in the adapter.
+    /// insert/update/skip decision in the adapter. Read only when
+    /// `operation: upsert` (Phase 13.1).
     pub on_existing: OnExisting,
+    /// What this mapping does — create/update, or remove (Phase 13.1).
+    pub operation: Operation,
+    /// `operation: delete` only (Phase 13.4): mark the tombstone permanent.
+    pub permanent: bool,
 }
 
 /// Owned runtime builder (Phase 2)
@@ -51,7 +61,10 @@ impl DocumentRuntimeBuilder {
                 entity_id,
                 source_version,
                 projected_version,
+                collection: mapping.collection.clone(),
                 on_existing: mapping.on_existing,
+                operation: mapping.operation,
+                permanent: mapping.permanent,
             });
         }
 
@@ -86,7 +99,10 @@ impl DocumentRuntimeBuilder {
             entity_id,
             source_version,
             projected_version,
+            collection: mapping.collection.clone(),
             on_existing: mapping.on_existing,
+            operation: mapping.operation,
+            permanent: mapping.permanent,
         })
     }
 }

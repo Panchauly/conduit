@@ -76,21 +76,21 @@ document:
     assert!(r2.is_success());
 
     // Verify document exists exactly once, keyed by entity id (Phase 11.1/11.3)
-    let doc_path = root.join("UserCreated").join("u1.json");
+    let doc_path = root.join("users").join("u1.json");
 
     assert!(doc_path.exists(), "document not written");
 
-    // Verify idempotency guard exists, keyed by (event_type, entity_id)
+    // Verify idempotency guard exists, keyed by (collection, entity_id)
     let guard_path = root
         .join(".conduit")
         .join("entities")
-        .join("UserCreated")
+        .join("users")
         .join("u1.done");
 
     assert!(guard_path.exists(), "idempotency guard missing");
 
     // Verify no duplicate documents
-    let entries: Vec<_> = std::fs::read_dir(root.join("UserCreated"))?.collect();
+    let entries: Vec<_> = std::fs::read_dir(root.join("users"))?.collect();
 
     assert_eq!(entries.len(), 1, "duplicate document written");
 

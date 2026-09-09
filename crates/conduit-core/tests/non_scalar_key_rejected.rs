@@ -137,7 +137,7 @@ document:
     );
 
     assert!(
-        !root.join("UserCreated").exists(),
+        !root.join("users").exists(),
         "no document should be written when the id is rejected"
     );
 

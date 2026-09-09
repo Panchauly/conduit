@@ -125,6 +125,7 @@ pub(crate) fn dispatch_with_routing(
         let adapter_report = match result.outcome {
             AdapterOutcome::Created => adapter_report.finish_created(adapter_finished_at),
             AdapterOutcome::Updated => adapter_report.finish_updated(adapter_finished_at),
+            AdapterOutcome::Deleted => adapter_report.finish_deleted(adapter_finished_at),
             AdapterOutcome::Skipped(reason) => {
                 adapter_report.finish_skipped(adapter_finished_at, reason)
             }

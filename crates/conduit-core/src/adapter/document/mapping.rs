@@ -1,5 +1,5 @@
 use super::adapter::DocumentError;
-use crate::adapter::{OnExisting, is_identity_scalar, json_scalar_to_string};
+use crate::adapter::{OnExisting, Operation, is_identity_scalar, json_scalar_to_string};
 use crate::event::Event;
 use crate::runtime::config::AdapterCapability;
 use serde::Deserialize;
@@ -24,9 +24,24 @@ pub struct DocumentMapping {
 
     /// Write mode for an entity that already has a projected document (Phase
     /// 12.2). Defaults to `ignore` — every mapping written before Phase 12
-    /// keeps its Phase 11 behavior unchanged.
+    /// keeps its Phase 11 behavior unchanged. Read only when `operation:
+    /// upsert` (Phase 13.1).
     #[serde(default)]
     pub on_existing: OnExisting,
+
+    /// What this mapping does: create/update the entity, or remove it (Phase
+    /// 13.1). Defaults to `upsert` — every mapping written before Phase 13
+    /// keeps its Phase 11/12 behavior unchanged. A `delete` mapping's
+    /// `document` must be empty (`null`, `{}`, or `[]`) — no projection body,
+    /// it only resolves the entity to remove.
+    #[serde(default)]
+    pub operation: Operation,
+
+    /// `operation: delete` only (Phase 13.4): this tombstone rejects every
+    /// later event for this key, forever — no resurrection. Ignored for
+    /// `operation: upsert`.
+    #[serde(default)]
+    pub permanent: bool,
 
     /// Capabilities adapters must provide to run this projection.
     #[serde(default)]
