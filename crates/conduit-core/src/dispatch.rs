@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
-use crate::adapter::StorageAdapter;
+use crate::adapter::{AdapterOutcome, StorageAdapter};
 use crate::event::Event;
 use crate::execution::{AdapterExecutionReport, AdapterReportError, ExecutionReport};
 use crate::routing::{AdapterId, StorageKind, route_with_rules};
@@ -25,7 +25,7 @@ fn dependency_order_failure_report(
     .with_source_version(event.version());
     let adapter_report =
         AdapterExecutionReport::new("_dispatch".to_string(), StorageKind::Sql, started_at)
-            .finish_failure(started_at, AdapterReportError::WriteFailed { message });
+            .finish_failed(started_at, AdapterReportError::WriteFailed { message });
     report.push_adapter_report(adapter_report);
     report.finish(started_at)
 }
@@ -120,21 +120,22 @@ pub(crate) fn dispatch_with_routing(
         )
         .with_versions(result.source_version, result.projected_version);
 
-        let adapter_report = if result.success {
-            adapter_report.finish_success(adapter_finished_at)
-        } else {
-            let err = result.error.as_ref().map(|e| e.into()).unwrap_or(
-                AdapterReportError::WriteFailed {
-                    message: "unknown error".to_string(),
-                },
-            );
+        let failed = matches!(result.outcome, AdapterOutcome::Failed(_));
 
-            adapter_report.finish_failure(adapter_finished_at, err)
+        let adapter_report = match result.outcome {
+            AdapterOutcome::Created => adapter_report.finish_created(adapter_finished_at),
+            AdapterOutcome::Updated => adapter_report.finish_updated(adapter_finished_at),
+            AdapterOutcome::Skipped(reason) => {
+                adapter_report.finish_skipped(adapter_finished_at, reason)
+            }
+            AdapterOutcome::Failed(err) => {
+                adapter_report.finish_failed(adapter_finished_at, (&err).into())
+            }
         };
 
         report.push_adapter_report(adapter_report);
 
-        if !result.success && failure_policy == FailurePolicy::FailFast {
+        if failed && failure_policy == FailurePolicy::FailFast {
             return report.finish(adapter_finished_at);
         }
     }

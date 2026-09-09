@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use super::adapter::SqlError;
-use crate::adapter::is_identity_scalar;
+use crate::adapter::{OnExisting, is_identity_scalar};
 use crate::event::Event;
 use crate::runtime::config::AdapterCapability;
 use serde_json::Value;
@@ -59,6 +59,12 @@ pub struct SqlMapping {
     pub primary_key: OneOrMany<String>,
 
     pub columns: HashMap<String, String>,
+
+    /// Write mode for an entity that already has a projected row (Phase
+    /// 12.2). Defaults to `ignore` — every mapping written before Phase 12
+    /// keeps its Phase 11 behavior unchanged.
+    #[serde(default)]
+    pub on_existing: OnExisting,
 
     /// Capabilities adapters must provide to run this projection (enum; parse-time validated).
     #[serde(default)]
@@ -124,12 +130,41 @@ impl SqlMapping {
 
         let placeholders = vec!["?"; columns.len()].join(", ");
 
-        let sql = format!(
-            "INSERT INTO {} ({}) VALUES ({})",
-            self.table,
-            columns.join(", "),
-            placeholders
-        );
+        let sql = match self.on_existing {
+            OnExisting::Ignore => format!(
+                "INSERT INTO {} ({}) VALUES ({})",
+                self.table,
+                columns.join(", "),
+                placeholders
+            ),
+            // Phase 12.3: the same statement doubles as a plain insert when no
+            // conflict exists (harmless — the ON CONFLICT clause just never
+            // fires), so `Insert` and `Update` decisions share one statement.
+            // Every mapped column is in the SET list — full replace, no
+            // partial-column updates (see Phase 12 non-goals).
+            //
+            // Requires the target table to declare an actual PRIMARY KEY or
+            // UNIQUE constraint on exactly these columns — SQLite (like
+            // Postgres) rejects an ON CONFLICT target with no matching
+            // constraint. That's schema ownership outside Conduit; a mapping
+            // author adding `on_existing: replace` must add the constraint too.
+            OnExisting::Replace => {
+                let conflict_columns = self.primary_key.iter().cloned().collect::<Vec<_>>();
+                let set_clause = columns
+                    .iter()
+                    .map(|c| format!("{c} = excluded.{c}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}",
+                    self.table,
+                    columns.join(", "),
+                    placeholders,
+                    conflict_columns.join(", "),
+                    set_clause
+                )
+            }
+        };
 
         Ok((sql, values, key_values))
     }
@@ -227,5 +262,40 @@ columns:
         };
         let err = m.build(&event).unwrap_err();
         assert!(err.to_string().contains("non-scalar"));
+    }
+
+    #[test]
+    fn ignore_mode_emits_plain_insert() {
+        let m = mapping_with_primary_key("id");
+        let event = Event {
+            event_id: "e1".into(),
+            event_type: "UserCreated".into(),
+            payload: r#"{ "id": "u1", "email": "a@b.com" }"#.into(),
+            metadata: HashMap::new(),
+            version: 1,
+            sequence: 1,
+        };
+        let (sql, _, _) = m.build(&event).unwrap();
+        assert!(!sql.contains("ON CONFLICT"), "{sql}");
+        assert!(sql.starts_with("INSERT INTO users"), "{sql}");
+    }
+
+    #[test]
+    fn replace_mode_emits_upsert_with_every_column_in_set_and_composite_conflict_target() {
+        let mut m = mapping_with_primary_key("[id, email]");
+        m.on_existing = OnExisting::Replace;
+        let event = Event {
+            event_id: "e1".into(),
+            event_type: "UserCreated".into(),
+            payload: r#"{ "id": "u1", "email": "a@b.com" }"#.into(),
+            metadata: HashMap::new(),
+            version: 1,
+            sequence: 1,
+        };
+        let (sql, _, _) = m.build(&event).unwrap();
+        assert!(sql.contains("ON CONFLICT (id, email)"), "{sql}");
+        assert!(sql.contains("DO UPDATE SET"), "{sql}");
+        assert!(sql.contains("email = excluded.email"), "{sql}");
+        assert!(sql.contains("id = excluded.id"), "{sql}");
     }
 }

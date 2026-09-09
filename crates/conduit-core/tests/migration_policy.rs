@@ -3,7 +3,7 @@
 use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use conduit_core::adapter::sql::sqlite::SqliteAdapter;
-use conduit_core::adapter::{AdapterError, StorageAdapter};
+use conduit_core::adapter::{AdapterError, AdapterOutcome, SkipReason, StorageAdapter};
 use conduit_core::event::Event;
 use conduit_core::runtime::config::MigrationPolicy;
 use conduit_core::upcast::{Upcaster, UpcasterRegistry};
@@ -103,7 +103,7 @@ fn registered_upcaster_projects_event_to_mapping_version() {
     let adapter = adapter(&db_path, registry, MigrationPolicy::Strict);
     let result = adapter.handle(&test_event(1));
 
-    assert!(result.success, "{:?}", result.error);
+    assert!(result.is_success(), "{:?}", result.outcome);
     assert_eq!(result.source_version, Some(1));
     assert_eq!(result.projected_version, Some(2));
 
@@ -124,10 +124,10 @@ fn strict_policy_fails_when_no_upcaster_chain_exists() {
     let adapter = adapter(&db_path, UpcasterRegistry::new(), MigrationPolicy::Strict);
     let result = adapter.handle(&test_event(1));
 
-    assert!(!result.success);
+    assert!(!result.is_success());
     assert!(matches!(
-        result.error,
-        Some(AdapterError::UnsupportedVersion(_))
+        result.outcome,
+        AdapterOutcome::Failed(AdapterError::UnsupportedVersion(_))
     ));
     assert_eq!(result.source_version, Some(1));
     assert_eq!(result.projected_version, Some(2));
@@ -152,8 +152,11 @@ fn ignore_unmatched_policy_skips_instead_of_failing_the_batch() {
     );
     let result = adapter.handle(&test_event(1));
 
-    assert!(result.success, "ignore policy must not fail the batch");
-    assert!(matches!(result.error, Some(AdapterError::Skipped(_))));
+    assert!(result.is_success(), "ignore policy must not fail the batch");
+    assert!(matches!(
+        result.outcome,
+        AdapterOutcome::Skipped(SkipReason::UnsupportedVersion)
+    ));
     assert_eq!(result.source_version, Some(1));
     assert_eq!(result.projected_version, Some(2));
 
@@ -206,7 +209,7 @@ columns:
 
     let result = adapter.handle(&test_event(1));
 
-    assert!(result.success, "{:?}", result.error);
+    assert!(result.is_success(), "{:?}", result.outcome);
     assert_eq!(result.source_version, Some(1));
     assert_eq!(result.projected_version, Some(1));
 }

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::adapter::SqlError;
 use super::mapping::SqlMapping;
+use crate::adapter::OnExisting;
 use crate::event::Event;
 use crate::upcast::UpcasterRegistry;
 
@@ -20,6 +21,9 @@ pub struct SqlProjection {
     /// Target table name, carried alongside `entity_key` as the other half of
     /// the Phase 11.2 guard key (`conduit_projection_state` is keyed per table).
     pub table: String,
+    /// The mapping's write mode (Phase 12.2) — governs the gated
+    /// insert/update/skip decision in the adapter.
+    pub on_existing: OnExisting,
 }
 
 /// Owned SQL builder used inside adapters
@@ -60,6 +64,7 @@ impl SqlRuntimeBuilder {
                 projected_version,
                 entity_key: encode_entity_key(&key_values)?,
                 table: mapping.table.clone(),
+                on_existing: mapping.on_existing,
             });
         }
 
@@ -96,6 +101,7 @@ impl SqlRuntimeBuilder {
             projected_version,
             entity_key: encode_entity_key(&key_values)?,
             table: mapping.table.clone(),
+            on_existing: mapping.on_existing,
         })
     }
 }

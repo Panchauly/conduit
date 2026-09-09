@@ -68,9 +68,9 @@ columns:
     let event = test_event();
 
     let r1 = adapter.handle(&event);
-    assert!(r1.success, "{:?}", r1.error);
+    assert!(r1.is_success(), "{:?}", r1.outcome);
     let r2 = adapter.handle(&event);
-    assert!(r2.success, "{:?}", r2.error);
+    assert!(r2.is_success(), "{:?}", r2.outcome);
 
     let conn = Connection::open(&db_path)?;
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
@@ -113,9 +113,9 @@ document:
     let event = test_event();
 
     let r1 = adapter.handle(&event);
-    assert!(r1.success, "{:?}", r1.error);
+    assert!(r1.is_success(), "{:?}", r1.outcome);
     let r2 = adapter.handle(&event);
-    assert!(r2.success, "{:?}", r2.error);
+    assert!(r2.is_success(), "{:?}", r2.outcome);
 
     let entries: Vec<_> = std::fs::read_dir(root.join("UserCreated"))?.collect();
     assert_eq!(

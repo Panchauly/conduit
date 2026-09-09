@@ -3,6 +3,7 @@
 use core::fmt;
 use std::collections::{HashMap, HashSet};
 
+use crate::adapter::OnExisting;
 use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::routing::AdapterId;
@@ -307,6 +308,20 @@ fn effective_capabilities(adapter: &AdapterConfig) -> HashSet<AdapterCapability>
     }
 }
 
+/// Effective required capabilities for a mapping (Phase 12.5): `on_existing:
+/// replace` implies `Upsert`, whether or not the mapping's
+/// `requires_capabilities` lists it explicitly.
+fn required_capabilities(
+    declared: &[AdapterCapability],
+    on_existing: OnExisting,
+) -> Vec<AdapterCapability> {
+    let mut required = declared.to_vec();
+    if on_existing == OnExisting::Replace && !required.contains(&AdapterCapability::Upsert) {
+        required.push(AdapterCapability::Upsert);
+    }
+    required
+}
+
 fn document_template_empty(doc: &serde_json::Value) -> bool {
     doc.is_null()
         || doc.as_object().is_some_and(|o| o.is_empty())
@@ -561,12 +576,9 @@ pub fn validate_projection_config(
                     continue;
                 };
                 let eff = effective_capabilities(ac);
-                let missing: Vec<_> = sql_map
-                    .requires_capabilities
-                    .iter()
-                    .copied()
-                    .filter(|c| !eff.contains(c))
-                    .collect();
+                let required =
+                    required_capabilities(&sql_map.requires_capabilities, sql_map.on_existing);
+                let missing: Vec<_> = required.into_iter().filter(|c| !eff.contains(c)).collect();
                 if !missing.is_empty() {
                     report.push(ValidationIssue::CapabilityMismatch {
                         event_type: event_type.clone(),
@@ -583,12 +595,9 @@ pub fn validate_projection_config(
                     continue;
                 };
                 let eff = effective_capabilities(ac);
-                let missing: Vec<_> = doc_map
-                    .requires_capabilities
-                    .iter()
-                    .copied()
-                    .filter(|c| !eff.contains(c))
-                    .collect();
+                let required =
+                    required_capabilities(&doc_map.requires_capabilities, doc_map.on_existing);
+                let missing: Vec<_> = required.into_iter().filter(|c| !eff.contains(c)).collect();
                 if !missing.is_empty() {
                     report.push(ValidationIssue::CapabilityMismatch {
                         event_type: event_type.clone(),

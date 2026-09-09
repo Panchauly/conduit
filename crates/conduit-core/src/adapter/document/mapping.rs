@@ -1,5 +1,5 @@
 use super::adapter::DocumentError;
-use crate::adapter::{is_identity_scalar, json_scalar_to_string};
+use crate::adapter::{OnExisting, is_identity_scalar, json_scalar_to_string};
 use crate::event::Event;
 use crate::runtime::config::AdapterCapability;
 use serde::Deserialize;
@@ -21,6 +21,12 @@ pub struct DocumentMapping {
 
     /// JSON-like structure where leaf values are payload/metadata paths
     pub document: Value,
+
+    /// Write mode for an entity that already has a projected document (Phase
+    /// 12.2). Defaults to `ignore` — every mapping written before Phase 12
+    /// keeps its Phase 11 behavior unchanged.
+    #[serde(default)]
+    pub on_existing: OnExisting,
 
     /// Capabilities adapters must provide to run this projection.
     #[serde(default)]

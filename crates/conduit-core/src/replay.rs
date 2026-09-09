@@ -264,7 +264,7 @@ fn unrouted_event_report(event: &Event) -> ExecutionReport {
     )
     .with_source_version(event.version());
     let adapter_report = AdapterExecutionReport::new("routing".to_string(), StorageKind::Sql, now)
-        .finish_failure(
+        .finish_failed(
             now,
             AdapterReportError::WriteFailed {
                 message: format!("no routing rule for event_type {:?}", event.event_type),

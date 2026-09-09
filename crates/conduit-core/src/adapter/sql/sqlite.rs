@@ -6,14 +6,14 @@ use crate::{
     adapter::json_scalar_to_string,
     adapter::sql::adapter::SqlError,
     adapter::sql::runtime::SqlRuntimeBuilder,
-    adapter::{AdapterError, AdapterResult, StorageAdapter},
+    adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter, WriteDecision, decide},
     event::Event,
     routing::StorageKind,
     runtime::config::MigrationPolicy,
     upcast::UpcasterRegistry,
 };
 
-/// SQLite runtime adapter (Phase 4: idempotent)
+/// SQLite runtime adapter (Phase 4: idempotent; Phase 12: sequence-gated upsert)
 pub struct SqliteAdapter {
     id: String,
     priority: u32,
@@ -78,10 +78,10 @@ impl StorageAdapter for SqliteAdapter {
                         from_version,
                         to_version,
                     ),
-                    MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_version(
+                    MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_versioned(
                         self.id.clone(),
                         StorageKind::Sql,
-                        reason,
+                        SkipReason::UnsupportedVersion,
                         from_version,
                         to_version,
                     ),
@@ -89,13 +89,14 @@ impl StorageAdapter for SqliteAdapter {
             }
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
-        let (sql, values, source_version, projected_version, entity_key, table) = (
+        let (sql, values, source_version, projected_version, entity_key, table, on_existing) = (
             projection.sql,
             projection.values,
             projection.source_version,
             projection.projected_version,
             projection.entity_key,
             projection.table,
+            projection.on_existing,
         );
 
         let mut conn = match Connection::open(&self.path) {
@@ -103,13 +104,14 @@ impl StorageAdapter for SqliteAdapter {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
-        // PHASE 11.2: ensure entity-aware idempotency guard table exists.
+        // PHASE 11.2: ensure the entity-aware idempotency guard table exists.
         // Supersedes the Phase 4 `conduit_events` (event_id-only) guard: two
         // different event_ids that resolve to the same (table, entity_key) are
         // now both caught, not just a replayed event_id. `entity_key` is the
         // Phase 11.1 canonical encoding — an ordered JSON array — so a
         // single-column key can never collide with a differently-split
-        // composite one.
+        // composite one. `last_sequence` (Phase 11.2: stored, not compared) is
+        // read and compared as of Phase 12.2/12.3.
         if let Err(e) = conn.execute(
             "CREATE TABLE IF NOT EXISTS conduit_projection_state (
                 target_table TEXT NOT NULL,
@@ -129,46 +131,73 @@ impl StorageAdapter for SqliteAdapter {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
-        // PHASE 11.2: entity-aware idempotency check, BEFORE the real INSERT —
-        // a second creation event for an already-created entity is skipped
-        // cleanly here; the INSERT (and any PK constraint) is never reached.
-        let already_processed: bool = match tx.query_row(
-            "SELECT 1 FROM conduit_projection_state WHERE target_table = ?1 AND entity_key = ?2",
+        // PHASE 12.2/12.3: read the guard's current state for this entity —
+        // read-decide-write, all inside this transaction. SQLite serializes
+        // writers, so this is atomic against concurrent dispatch.
+        let stored_last_sequence: Option<u64> = match tx.query_row(
+            "SELECT last_sequence FROM conduit_projection_state WHERE target_table = ?1 AND entity_key = ?2",
             params![table, entity_key],
-            |_| Ok(()),
+            |row| row.get::<_, i64>(0),
         ) {
-            Ok(_) => true,
-            Err(rusqlite::Error::QueryReturnedNoRows) => false,
+            Ok(v) => Some(v as u64),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
+        let exists = stored_last_sequence.is_some();
 
-        if already_processed {
-            return AdapterResult::skipped_version(
-                self.id.clone(),
-                StorageKind::Sql,
-                format!("entity {} already projected into '{}'", entity_key, table),
-                source_version,
-                projected_version,
-            );
-        }
+        // The gated decision (Phase 12.2) — before the real write, so a
+        // duplicate or stale event never reaches the INSERT/UPSERT statement.
+        let is_update = match decide(on_existing, exists, stored_last_sequence, event.sequence) {
+            WriteDecision::SkipIdempotent => {
+                return AdapterResult::skipped_versioned(
+                    self.id.clone(),
+                    StorageKind::Sql,
+                    SkipReason::AlreadyProjected,
+                    source_version,
+                    projected_version,
+                );
+            }
+            WriteDecision::SkipStale => {
+                return AdapterResult::skipped_versioned(
+                    self.id.clone(),
+                    StorageKind::Sql,
+                    SkipReason::StaleSequence,
+                    source_version,
+                    projected_version,
+                );
+            }
+            WriteDecision::Insert => false,
+            WriteDecision::Update => true,
+        };
 
         // Convert JSON values to bind params
         let params: Vec<String> = values.iter().map(json_scalar_to_string).collect();
 
-        // Execute projection
+        // Execute the projection (plain INSERT for `ignore`; the statement
+        // doubles as an upsert for `replace` — see `SqlMapping::build`).
         if let Err(e) = tx.execute(&sql, params_from_iter(params.iter())) {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
-        // PHASE 11.2: record the guard row AFTER the write, same transaction.
-        // `last_sequence` is stored, not compared — first creation wins (no
-        // Upsert/CAS semantics exist yet; see Phase 11 non-goals).
-        if let Err(e) = tx.execute(
-            "INSERT INTO conduit_projection_state
-                (target_table, entity_key, last_sequence, last_event_id, processed_at)
-             VALUES (?1, ?2, ?3, ?4, datetime('now'))",
-            params![table, entity_key, event.sequence as i64, event.event_id],
-        ) {
+        // PHASE 11.2/12.3: record the guard row's new state AFTER the write,
+        // same transaction — an INSERT for a brand-new entity, an UPDATE to
+        // bump `last_sequence` for one being replaced.
+        let guard_result = if is_update {
+            tx.execute(
+                "UPDATE conduit_projection_state
+                    SET last_sequence = ?3, last_event_id = ?4, processed_at = datetime('now')
+                 WHERE target_table = ?1 AND entity_key = ?2",
+                params![table, entity_key, event.sequence as i64, event.event_id],
+            )
+        } else {
+            tx.execute(
+                "INSERT INTO conduit_projection_state
+                    (target_table, entity_key, last_sequence, last_event_id, processed_at)
+                 VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+                params![table, entity_key, event.sequence as i64, event.event_id],
+            )
+        };
+        if let Err(e) = guard_result {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
@@ -176,11 +205,20 @@ impl StorageAdapter for SqliteAdapter {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
-        AdapterResult::success_versioned(
-            self.id.clone(),
-            StorageKind::Sql,
-            source_version,
-            projected_version,
-        )
+        if is_update {
+            AdapterResult::updated_versioned(
+                self.id.clone(),
+                StorageKind::Sql,
+                source_version,
+                projected_version,
+            )
+        } else {
+            AdapterResult::created_versioned(
+                self.id.clone(),
+                StorageKind::Sql,
+                source_version,
+                projected_version,
+            )
+        }
     }
 }

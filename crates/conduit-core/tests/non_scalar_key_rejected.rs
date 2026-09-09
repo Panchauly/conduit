@@ -2,13 +2,13 @@
 //! resolving to a JSON object/array means the mapping points at the wrong
 //! place — the build must fail fast and never reach the guard table/file.
 
-use conduit_core::adapter::StorageAdapter;
 use conduit_core::adapter::document::file::FileDocumentAdapter;
 use conduit_core::adapter::document::mapping::DocumentMapping;
 use conduit_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use conduit_core::adapter::sql::sqlite::SqliteAdapter;
+use conduit_core::adapter::{AdapterOutcome, StorageAdapter};
 use conduit_core::event::Event;
 use conduit_core::runtime::config::MigrationPolicy;
 use conduit_core::upcast::UpcasterRegistry;
@@ -17,6 +17,13 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tempfile::tempdir;
+
+fn failure_message(outcome: &AdapterOutcome) -> String {
+    match outcome {
+        AdapterOutcome::Failed(err) => err.to_string(),
+        other => panic!("expected a failed outcome, got {:?}", other),
+    }
+}
 
 fn event_with_non_scalar_id(payload: &str) -> Event {
     Event {
@@ -68,10 +75,10 @@ columns:
     let result = adapter.handle(&event);
 
     assert!(
-        !result.success,
+        !result.is_success(),
         "non-scalar primary key must fail the build"
     );
-    let message = result.error.map(|e| e.to_string()).unwrap_or_default();
+    let message = failure_message(&result.outcome);
     assert!(
         message.contains("non-scalar"),
         "unexpected error: {}",
@@ -121,8 +128,8 @@ document:
     let event = event_with_non_scalar_id(r#"{ "id": { "nested": true } }"#);
     let result = adapter.handle(&event);
 
-    assert!(!result.success, "non-scalar id must fail the build");
-    let message = result.error.map(|e| e.to_string()).unwrap_or_default();
+    assert!(!result.is_success(), "non-scalar id must fail the build");
+    let message = failure_message(&result.outcome);
     assert!(
         message.contains("non-scalar"),
         "unexpected error: {}",

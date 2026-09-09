@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use crate::adapter::AdapterError;
+use crate::adapter::{AdapterError, SkipReason};
 use crate::routing::StorageKind;
 
 // ---------------------------------------------------------------------------
@@ -33,25 +33,29 @@ pub enum ExecutionMode {
     DryRun,
 }
 
-/// Outcome of a single adapter invocation.
+/// Outcome of a single adapter invocation (Phase 12.1). `Skipped` carries the
+/// machine-readable [`SkipReason`] directly — no more string-sniffing a
+/// message to tell an idempotent skip from a stale-sequence rejection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum AdapterOutcome {
-    Succeeded,
-    /// Write or side-effect failed.
-    WriteFailed,
-    /// Idempotent replay (event already applied).
-    Skipped,
-    /// No upcaster chain to the mapping's target version (`MigrationPolicy::Strict`).
-    UnsupportedVersion,
+    /// A new entity was written.
+    Created,
+    /// An existing entity was overwritten (`on_existing: replace` only, Phase 12).
+    Updated,
+    /// Nothing was written; see `reason`.
+    Skipped { reason: SkipReason },
+    /// The adapter failed; see the sibling `error` field for detail.
+    Failed,
 }
 
-/// Structured error for adapter execution.
+/// Structured error for adapter execution. Populated only when `outcome` is
+/// [`AdapterOutcome::Failed`] — skips carry their reason on the outcome
+/// itself, not here (Phase 12.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AdapterReportError {
     WriteFailed { message: String },
-    Skipped { message: String },
     UnsupportedVersion { message: String },
 }
 
@@ -59,7 +63,6 @@ impl From<AdapterError> for AdapterReportError {
     fn from(e: AdapterError) -> Self {
         match e {
             AdapterError::WriteFailed(msg) => AdapterReportError::WriteFailed { message: msg },
-            AdapterError::Skipped(msg) => AdapterReportError::Skipped { message: msg },
             AdapterError::UnsupportedVersion(msg) => {
                 AdapterReportError::UnsupportedVersion { message: msg }
             }
@@ -71,9 +74,6 @@ impl From<&AdapterError> for AdapterReportError {
     fn from(e: &AdapterError) -> Self {
         match e {
             AdapterError::WriteFailed(msg) => AdapterReportError::WriteFailed {
-                message: msg.clone(),
-            },
-            AdapterError::Skipped(msg) => AdapterReportError::Skipped {
                 message: msg.clone(),
             },
             AdapterError::UnsupportedVersion(msg) => AdapterReportError::UnsupportedVersion {
@@ -166,12 +166,11 @@ impl ExecutionReport {
             .ok()
             .map(duration_to_ms);
 
-        self.status = if self.adapter_reports.iter().any(|r| {
-            matches!(
-                r.outcome,
-                AdapterOutcome::WriteFailed | AdapterOutcome::UnsupportedVersion
-            )
-        }) {
+        self.status = if self
+            .adapter_reports
+            .iter()
+            .any(|r| matches!(r.outcome, AdapterOutcome::Failed))
+        {
             ExecutionStatus::Failed
         } else {
             ExecutionStatus::Succeeded
@@ -225,7 +224,7 @@ impl AdapterExecutionReport {
             started_at,
             finished_at: None,
             duration_ms: None,
-            outcome: AdapterOutcome::Succeeded, // provisional
+            outcome: AdapterOutcome::Created, // provisional
             error: None,
             source_version: None,
             projected_version: None,
@@ -243,37 +242,40 @@ impl AdapterExecutionReport {
         self
     }
 
-    /// Finish successfully.
-    pub fn finish_success(mut self, finished_at: SystemTime) -> Self {
+    fn finish_at(&mut self, finished_at: SystemTime) {
         self.finished_at = Some(finished_at);
-
         self.duration_ms = finished_at
             .duration_since(self.started_at)
             .ok()
             .map(duration_to_ms);
+    }
 
-        self.outcome = AdapterOutcome::Succeeded;
-
+    /// Finish: a new entity was created.
+    pub fn finish_created(mut self, finished_at: SystemTime) -> Self {
+        self.finish_at(finished_at);
+        self.outcome = AdapterOutcome::Created;
         self
     }
 
-    /// Finish with failure or skipped.
-    pub fn finish_failure(mut self, finished_at: SystemTime, error: AdapterReportError) -> Self {
-        self.finished_at = Some(finished_at);
+    /// Finish: an existing entity was overwritten (Phase 12).
+    pub fn finish_updated(mut self, finished_at: SystemTime) -> Self {
+        self.finish_at(finished_at);
+        self.outcome = AdapterOutcome::Updated;
+        self
+    }
 
-        self.duration_ms = finished_at
-            .duration_since(self.started_at)
-            .ok()
-            .map(duration_to_ms);
+    /// Finish: nothing was written; see `reason`.
+    pub fn finish_skipped(mut self, finished_at: SystemTime, reason: SkipReason) -> Self {
+        self.finish_at(finished_at);
+        self.outcome = AdapterOutcome::Skipped { reason };
+        self
+    }
 
-        self.outcome = match &error {
-            AdapterReportError::WriteFailed { .. } => AdapterOutcome::WriteFailed,
-            AdapterReportError::Skipped { .. } => AdapterOutcome::Skipped,
-            AdapterReportError::UnsupportedVersion { .. } => AdapterOutcome::UnsupportedVersion,
-        };
-
+    /// Finish with failure.
+    pub fn finish_failed(mut self, finished_at: SystemTime, error: AdapterReportError) -> Self {
+        self.finish_at(finished_at);
+        self.outcome = AdapterOutcome::Failed;
         self.error = Some(error);
-
         self
     }
 }
@@ -320,7 +322,7 @@ mod tests {
         );
         report.push_adapter_report(
             AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
-                .finish_success(finished),
+                .finish_created(finished),
         );
         let report = report.finish(finished);
 
@@ -342,11 +344,11 @@ mod tests {
         );
         report.push_adapter_report(
             AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
-                .finish_success(finished),
+                .finish_created(finished),
         );
         report.push_adapter_report(
             AdapterExecutionReport::new("doc".to_string(), StorageKind::Document, started)
-                .finish_failure(
+                .finish_failed(
                     finished,
                     AdapterReportError::WriteFailed {
                         message: "boom".to_string(),
@@ -373,7 +375,7 @@ mod tests {
         report.push_adapter_report(
             AdapterExecutionReport::new("sql".to_string(), StorageKind::Sql, started)
                 .with_versions(Some(1), Some(2))
-                .finish_failure(
+                .finish_failed(
                     finished,
                     AdapterReportError::UnsupportedVersion {
                         message: "no upcaster chain".to_string(),
@@ -386,14 +388,11 @@ mod tests {
         assert_eq!(report.source_version, 1);
         assert_eq!(report.adapter_reports[0].source_version, Some(1));
         assert_eq!(report.adapter_reports[0].projected_version, Some(2));
-        assert_eq!(
-            report.adapter_reports[0].outcome,
-            AdapterOutcome::UnsupportedVersion
-        );
+        assert_eq!(report.adapter_reports[0].outcome, AdapterOutcome::Failed);
     }
 
     #[test]
-    fn finish_failure_with_skipped_error_does_not_fail_overall_status() {
+    fn finish_skipped_does_not_fail_overall_status() {
         let started = SystemTime::now();
 
         let mut report = ExecutionReport::new(
@@ -404,14 +403,14 @@ mod tests {
         );
         let adapter =
             AdapterExecutionReport::new("doc".to_string(), StorageKind::Document, started)
-                .finish_failure(
-                    started,
-                    AdapterReportError::Skipped {
-                        message: "already applied".to_string(),
-                    },
-                );
+                .finish_skipped(started, SkipReason::AlreadyProjected);
 
-        assert_eq!(adapter.outcome, AdapterOutcome::Skipped);
+        assert_eq!(
+            adapter.outcome,
+            AdapterOutcome::Skipped {
+                reason: SkipReason::AlreadyProjected
+            }
+        );
 
         report.push_adapter_report(adapter);
         let report = report.finish(started);
@@ -456,11 +455,12 @@ mod tests {
             }
         );
 
-        let skipped: AdapterReportError = AdapterError::Skipped("done already".to_string()).into();
+        let unsupported: AdapterReportError =
+            AdapterError::UnsupportedVersion("no upcaster chain".to_string()).into();
         assert_eq!(
-            skipped,
-            AdapterReportError::Skipped {
-                message: "done already".to_string()
+            unsupported,
+            AdapterReportError::UnsupportedVersion {
+                message: "no upcaster chain".to_string()
             }
         );
     }

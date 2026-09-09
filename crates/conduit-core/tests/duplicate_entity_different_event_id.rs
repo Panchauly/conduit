@@ -10,7 +10,7 @@ use conduit_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use conduit_core::adapter::sql::sqlite::SqliteAdapter;
-use conduit_core::adapter::{AdapterError, StorageAdapter};
+use conduit_core::adapter::{AdapterOutcome, SkipReason, StorageAdapter};
 use conduit_core::event::Event;
 use conduit_core::runtime::config::MigrationPolicy;
 use conduit_core::upcast::UpcasterRegistry;
@@ -80,19 +80,22 @@ columns:
     let second = event_for_entity_u1("evt-2", 2, "second@example.com");
 
     let r1 = adapter.handle(&first);
-    assert!(r1.success, "{:?}", r1.error);
+    assert!(r1.is_success(), "{:?}", r1.outcome);
 
     let r2 = adapter.handle(&second);
     assert!(
-        r2.success,
+        r2.is_success(),
         "a second event_id for an already-created entity must be a clean skip, \
          never a raw driver error: {:?}",
-        r2.error
+        r2.outcome
     );
     assert!(
-        matches!(r2.error, Some(AdapterError::Skipped(_))),
-        "expected Skipped, got {:?}",
-        r2.error
+        matches!(
+            r2.outcome,
+            AdapterOutcome::Skipped(SkipReason::AlreadyProjected)
+        ),
+        "expected Skipped(AlreadyProjected), got {:?}",
+        r2.outcome
     );
 
     let conn = Connection::open(&db_path)?;
@@ -148,18 +151,21 @@ document:
     let second = event_for_entity_u1("evt-2", 2, "second@example.com");
 
     let r1 = adapter.handle(&first);
-    assert!(r1.success, "{:?}", r1.error);
+    assert!(r1.is_success(), "{:?}", r1.outcome);
 
     let r2 = adapter.handle(&second);
     assert!(
-        r2.success,
+        r2.is_success(),
         "a second event_id for an already-created entity must be a clean skip: {:?}",
-        r2.error
+        r2.outcome
     );
     assert!(
-        matches!(r2.error, Some(AdapterError::Skipped(_))),
-        "expected Skipped, got {:?}",
-        r2.error
+        matches!(
+            r2.outcome,
+            AdapterOutcome::Skipped(SkipReason::AlreadyProjected)
+        ),
+        "expected Skipped(AlreadyProjected), got {:?}",
+        r2.outcome
     );
 
     // No second file: this is the case Phase 4 (event_id-keyed guard, event_id-keyed

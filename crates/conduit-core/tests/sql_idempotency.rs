@@ -84,10 +84,10 @@ columns:
     // --------------------------------------------------
 
     let r1 = sql_adapter.handle(&event);
-    assert!(r1.success);
+    assert!(r1.is_success());
 
     let r2 = sql_adapter.handle(&event);
-    assert!(r2.success);
+    assert!(r2.is_success());
 
     // Verify only one row exists
     let conn = Connection::open(&db_path)?;
