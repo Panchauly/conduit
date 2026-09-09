@@ -26,16 +26,17 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 12 | Sequence-Gated Upsert (12.1–12.6) | ✅ Completed | [phases/phase-12-sequence-gated-upsert.md](phases/phase-12-sequence-gated-upsert.md) |
 | 13 | Deletion & Tombstones (13.1–13.6) | ✅ Completed | [phases/phase-13-deletion-tombstones.md](phases/phase-13-deletion-tombstones.md) |
 | 14 | Cache Adapter (Key-Value) (14.1–14.5) | ✅ Completed | [phases/phase-14-cache-adapter.md](phases/phase-14-cache-adapter.md) |
+| 15 | Facet Partial Updates (15.1–15.6) | 🎯 Planned | [phases/phase-15-facet-partial-updates.md](phases/phase-15-facet-partial-updates.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md)
 
 ---
 
-## Beyond Phase 14
+## Beyond Phase 15
 
 Candidate future phases, not yet planned in detail:
 
-- **Phase 15** — Partial-column / field-level projection updates (per-`(entity, field-group)` sequence lanes, create-vs-update mapping taxonomy). Deferred out of Phase 12 for guard-model complexity — see that phase's Non-Goals.
 - **Phase 16** — Graph adapter (`StorageKind::Graph` — already routed, no adapter yet)
+- **Later backends** — Postgres SQL backend, Redis key-value backend (both currently single-implementation, like SQLite / file-backed).
 
 SQL, Document, and Key-Value (file-backed) adapters are implemented. The Graph adapter — named in the project pitch — does not exist yet.
