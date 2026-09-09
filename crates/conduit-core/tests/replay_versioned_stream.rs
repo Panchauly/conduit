@@ -5,14 +5,14 @@
 use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::event::Event;
 use conduit_core::execute_event_with_upcasters;
-use conduit_core::replay::{events_from_path, ReplayContext};
+use conduit_core::replay::{ReplayContext, events_from_path};
 use conduit_core::runtime::config::{
     AdapterConfig, ConduitConfig, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
 };
 use conduit_core::upcast::{Upcaster, UpcasterRegistry};
 
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
@@ -111,6 +111,7 @@ fn mixed_version_events() -> Vec<Event> {
             payload: r#"{"id":"u1"}"#.to_string(),
             metadata: HashMap::new(),
             version: 1,
+            sequence: 1,
         },
         Event {
             event_id: "e2".to_string(),
@@ -118,6 +119,7 @@ fn mixed_version_events() -> Vec<Event> {
             payload: r#"{"id":"u2","email":"u2@x.com"}"#.to_string(),
             metadata: HashMap::new(),
             version: 2,
+            sequence: 1,
         },
         Event {
             event_id: "e3".to_string(),
@@ -125,6 +127,7 @@ fn mixed_version_events() -> Vec<Event> {
             payload: r#"{"id":"u3","email":"u3@x.com","tier":"gold"}"#.to_string(),
             metadata: HashMap::new(),
             version: 3,
+            sequence: 1,
         },
     ]
 }

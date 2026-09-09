@@ -18,6 +18,7 @@ fn test_event(event_type: &str) -> Event {
         payload: "{}".to_string(),
         metadata: HashMap::new(),
         version: 1,
+        sequence: 1,
     }
 }
 

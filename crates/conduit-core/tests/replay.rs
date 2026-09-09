@@ -4,7 +4,7 @@ use conduit_core::adapter::document::mapping::DocumentMapping;
 use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::event::Event;
 use conduit_core::execution::ExecutionStatus;
-use conduit_core::replay::{events_from_path, ReplayContext, ReplayRunOptions};
+use conduit_core::replay::{ReplayContext, ReplayRunOptions, events_from_path};
 use conduit_core::runtime::config::{
     AdapterConfig, ConduitConfig, FailurePolicy, FileAdapterConfig, FileConfig, RoutingConfig,
     SqliteAdapterConfig, SqliteConfig,
@@ -33,7 +33,10 @@ fn rules_user_created_and_failing() -> HashMap<String, Vec<String>> {
     m
 }
 
-fn user_created_and_failing_mappings() -> (HashMap<String, SqlMapping>, HashMap<String, DocumentMapping>) {
+fn user_created_and_failing_mappings() -> (
+    HashMap<String, SqlMapping>,
+    HashMap<String, DocumentMapping>,
+) {
     let (mut sql, mut doc) = user_created_mappings();
     sql.insert(
         "FailingEvent".to_string(),
@@ -56,6 +59,7 @@ columns:
 event: FailingEvent
 collection: users
 version: 1
+id: payload.id
 document:
   id: payload.id
 "#,
@@ -97,7 +101,10 @@ fn sample_config(doc_root: &Path, sqlite_path: &Path) -> ConduitConfig {
     }
 }
 
-fn user_created_mappings() -> (HashMap<String, SqlMapping>, HashMap<String, DocumentMapping>) {
+fn user_created_mappings() -> (
+    HashMap<String, SqlMapping>,
+    HashMap<String, DocumentMapping>,
+) {
     let mut sql = HashMap::new();
     sql.insert(
         "UserCreated".to_string(),
@@ -121,6 +128,7 @@ columns:
 event: UserCreated
 collection: users
 version: 1
+id: payload.id
 document:
   id: payload.id
 "#,
@@ -157,6 +165,7 @@ fn replay_directory_sorted_order_two_user_created() {
             payload: r#"{"id":"u2"}"#.into(),
             metadata: HashMap::new(),
             version: 1,
+            sequence: 1,
         })
         .unwrap(),
     )
@@ -169,6 +178,7 @@ fn replay_directory_sorted_order_two_user_created() {
             payload: r#"{"id":"u1"}"#.into(),
             metadata: HashMap::new(),
             version: 1,
+            sequence: 1,
         })
         .unwrap(),
     )
@@ -205,6 +215,7 @@ fn replay_ndjson_file() {
         payload: r#"{"id":"a"}"#.into(),
         metadata: HashMap::new(),
         version: 1,
+        sequence: 1,
     };
     let e2 = Event {
         event_id: "n2".into(),
@@ -212,6 +223,7 @@ fn replay_ndjson_file() {
         payload: r#"{"id":"b"}"#.into(),
         metadata: HashMap::new(),
         version: 1,
+        sequence: 1,
     };
     fs::write(
         &f,
@@ -255,6 +267,7 @@ fn replay_fail_fast_stops_after_second_event_failure() {
             payload: r#"{"id":"u1"}"#.into(),
             metadata: HashMap::new(),
             version: 1,
+            sequence: 1,
         })
         .unwrap(),
     )
@@ -267,6 +280,7 @@ fn replay_fail_fast_stops_after_second_event_failure() {
             payload: "{}".into(),
             metadata: HashMap::new(),
             version: 1,
+            sequence: 1,
         })
         .unwrap(),
     )
@@ -312,6 +326,7 @@ fn replay_continue_on_error_processes_all() {
                 payload: payload.into(),
                 metadata: HashMap::new(),
                 version: 1,
+                sequence: 1,
             })
             .unwrap(),
         )
@@ -353,6 +368,7 @@ fn replay_max_per_event_summaries_caps_success_rows() {
                 payload: format!(r#"{{"id":"{}"}}"#, id),
                 metadata: HashMap::new(),
                 version: 1,
+                sequence: 1,
             })
             .unwrap(),
         )
@@ -394,6 +410,7 @@ fn replay_validate_routing_fails_unknown_event_type() {
             payload: "{}".into(),
             metadata: HashMap::new(),
             version: 1,
+            sequence: 1,
         })
         .unwrap(),
     )
@@ -471,6 +488,7 @@ fn replay_user_created_writes_two_sqlite_adapters() {
             payload: r#"{"id":"u1"}"#.into(),
             metadata: HashMap::new(),
             version: 1,
+            sequence: 1,
         })
         .unwrap(),
     )
@@ -485,7 +503,9 @@ fn replay_user_created_writes_two_sqlite_adapters() {
     for db in [&db_master, &db_slave] {
         let c = rusqlite::Connection::open(db).unwrap();
         let n: i64 = c
-            .query_row("SELECT COUNT(*) FROM users WHERE id = 'u1'", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM users WHERE id = 'u1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(n, 1, "db {:?}", db);
     }

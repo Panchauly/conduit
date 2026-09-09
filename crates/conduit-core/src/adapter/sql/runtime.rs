@@ -11,6 +11,15 @@ pub struct SqlProjection {
     pub values: Vec<serde_json::Value>,
     pub source_version: u32,
     pub projected_version: u32,
+    /// Resolved entity identity (Phase 11.1/11.2), canonicalized as an
+    /// ordered JSON array of the `primary_key` column value(s) in declared
+    /// order — `["u1"]` for a single-column key, `["a","b"]` for a composite
+    /// one. One encoding path for both cases, so a single-column key never
+    /// collides with a differently-split composite key.
+    pub entity_key: String,
+    /// Target table name, carried alongside `entity_key` as the other half of
+    /// the Phase 11.2 guard key (`conduit_projection_state` is keyed per table).
+    pub table: String,
 }
 
 /// Owned SQL builder used inside adapters
@@ -43,12 +52,14 @@ impl SqlRuntimeBuilder {
         let projected_version = mapping.version;
 
         if source_version == projected_version {
-            let (sql, values) = mapping.build(event)?;
+            let (sql, values, key_values) = mapping.build(event)?;
             return Ok(SqlProjection {
                 sql,
                 values,
                 source_version,
                 projected_version,
+                entity_key: encode_entity_key(&key_values)?,
+                table: mapping.table.clone(),
             });
         }
 
@@ -56,7 +67,12 @@ impl SqlRuntimeBuilder {
             .map_err(|e| SqlError::BuildFailed(format!("invalid payload JSON: {}", e)))?;
 
         let upcasted_payload = upcasters
-            .upcast(&event.event_type, payload, source_version, projected_version)
+            .upcast(
+                &event.event_type,
+                payload,
+                source_version,
+                projected_version,
+            )
             .map_err(|e| SqlError::UnsupportedVersion {
                 event_type: event.event_type.clone(),
                 from_version: source_version,
@@ -72,12 +88,23 @@ impl SqlRuntimeBuilder {
             ..event.clone()
         };
 
-        let (sql, values) = mapping.build(&upcasted_event)?;
+        let (sql, values, key_values) = mapping.build(&upcasted_event)?;
         Ok(SqlProjection {
             sql,
             values,
             source_version,
             projected_version,
+            entity_key: encode_entity_key(&key_values)?,
+            table: mapping.table.clone(),
         })
     }
+}
+
+/// Canonical entity-key encoding (Phase 11.1): an ordered JSON array of the
+/// resolved `primary_key` value(s), single-column keys included — exactly one
+/// encoding path, so naive concatenation can never make `("AB","C")` collide
+/// with `("A","BC")`.
+fn encode_entity_key(key_values: &[serde_json::Value]) -> Result<String, SqlError> {
+    serde_json::to_string(key_values)
+        .map_err(|e| SqlError::BuildFailed(format!("failed to encode entity key: {}", e)))
 }

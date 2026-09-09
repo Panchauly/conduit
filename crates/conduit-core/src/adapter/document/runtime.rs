@@ -10,6 +10,9 @@ pub struct DocumentProjection {
     pub document: serde_json::Value,
     pub source_version: u32,
     pub projected_version: u32,
+    /// Resolved entity identity (Phase 11.1) — keys the idempotency guard and
+    /// the output filename (Phase 11.3), rather than `event.event_id`.
+    pub entity_id: String,
 }
 
 /// Owned runtime builder (Phase 2)
@@ -38,9 +41,10 @@ impl DocumentRuntimeBuilder {
         let projected_version = mapping.version;
 
         if source_version == projected_version {
-            let document = mapping.apply(event)?;
+            let (document, entity_id) = mapping.apply(event)?;
             return Ok(DocumentProjection {
                 document,
+                entity_id,
                 source_version,
                 projected_version,
             });
@@ -50,7 +54,12 @@ impl DocumentRuntimeBuilder {
             .map_err(|e| DocumentError::BuildFailed(format!("invalid payload JSON: {}", e)))?;
 
         let upcasted_payload = upcasters
-            .upcast(&event.event_type, payload, source_version, projected_version)
+            .upcast(
+                &event.event_type,
+                payload,
+                source_version,
+                projected_version,
+            )
             .map_err(|e| DocumentError::UnsupportedVersion {
                 event_type: event.event_type.clone(),
                 from_version: source_version,
@@ -66,9 +75,10 @@ impl DocumentRuntimeBuilder {
             ..event.clone()
         };
 
-        let document = mapping.apply(&upcasted_event)?;
+        let (document, entity_id) = mapping.apply(&upcasted_event)?;
         Ok(DocumentProjection {
             document,
+            entity_id,
             source_version,
             projected_version,
         })

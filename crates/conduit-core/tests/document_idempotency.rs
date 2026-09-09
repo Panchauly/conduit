@@ -21,6 +21,7 @@ fn test_event() -> Event {
         payload: r#"{ "id": "u1", "email": "a@b.com" }"#.to_string(),
         metadata: HashMap::new(),
         version: 1,
+        sequence: 1,
     }
 }
 
@@ -43,6 +44,7 @@ fn document_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
 event: UserCreated
 collection: users
 version: 1
+id: payload.id
 document:
   id: payload.id
   email: payload.email
@@ -73,13 +75,17 @@ document:
     let r2 = adapter.handle(&event);
     assert!(r2.success);
 
-    // Verify document exists exactly once
-    let doc_path = root.join("UserCreated").join("evt-1.json");
+    // Verify document exists exactly once, keyed by entity id (Phase 11.1/11.3)
+    let doc_path = root.join("UserCreated").join("u1.json");
 
     assert!(doc_path.exists(), "document not written");
 
-    // Verify idempotency guard exists
-    let guard_path = root.join(".conduit").join("events").join("evt-1.done");
+    // Verify idempotency guard exists, keyed by (event_type, entity_id)
+    let guard_path = root
+        .join(".conduit")
+        .join("entities")
+        .join("UserCreated")
+        .join("u1.done");
 
     assert!(guard_path.exists(), "idempotency guard missing");
 

@@ -14,7 +14,7 @@ impl<'a> DocumentPreviewBuilder<'a> {
         Self { mappings }
     }
 
-    pub fn preview(&self, event: &Event) -> Result<serde_json::Value, DocumentError> {
+    pub fn preview(&self, event: &Event) -> Result<(serde_json::Value, String), DocumentError> {
         let mapping = self
             .mappings
             .get(&event.event_type)

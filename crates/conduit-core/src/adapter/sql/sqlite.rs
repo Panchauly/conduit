@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use rusqlite::{params, params_from_iter, Connection};
-use serde_json::Value;
+use rusqlite::{Connection, params, params_from_iter};
 
 use crate::{
+    adapter::json_scalar_to_string,
     adapter::sql::adapter::SqlError,
     adapter::sql::runtime::SqlRuntimeBuilder,
     adapter::{AdapterError, AdapterResult, StorageAdapter},
@@ -89,11 +89,13 @@ impl StorageAdapter for SqliteAdapter {
             }
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
-        let (sql, values, source_version, projected_version) = (
+        let (sql, values, source_version, projected_version, entity_key, table) = (
             projection.sql,
             projection.values,
             projection.source_version,
             projection.projected_version,
+            projection.entity_key,
+            projection.table,
         );
 
         let mut conn = match Connection::open(&self.path) {
@@ -101,11 +103,21 @@ impl StorageAdapter for SqliteAdapter {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
-        // PHASE 4: ensure idempotency table exists
+        // PHASE 11.2: ensure entity-aware idempotency guard table exists.
+        // Supersedes the Phase 4 `conduit_events` (event_id-only) guard: two
+        // different event_ids that resolve to the same (table, entity_key) are
+        // now both caught, not just a replayed event_id. `entity_key` is the
+        // Phase 11.1 canonical encoding — an ordered JSON array — so a
+        // single-column key can never collide with a differently-split
+        // composite one.
         if let Err(e) = conn.execute(
-            "CREATE TABLE IF NOT EXISTS conduit_events (
-                event_id TEXT PRIMARY KEY,
-                processed_at TEXT NOT NULL
+            "CREATE TABLE IF NOT EXISTS conduit_projection_state (
+                target_table TEXT NOT NULL,
+                entity_key TEXT NOT NULL,
+                last_sequence INTEGER NOT NULL,
+                last_event_id TEXT NOT NULL,
+                processed_at TEXT NOT NULL,
+                PRIMARY KEY (target_table, entity_key)
             )",
             [],
         ) {
@@ -117,10 +129,12 @@ impl StorageAdapter for SqliteAdapter {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
-        // PHASE 4: idempotency check
+        // PHASE 11.2: entity-aware idempotency check, BEFORE the real INSERT —
+        // a second creation event for an already-created entity is skipped
+        // cleanly here; the INSERT (and any PK constraint) is never reached.
         let already_processed: bool = match tx.query_row(
-            "SELECT 1 FROM conduit_events WHERE event_id = ?",
-            params![event.event_id],
+            "SELECT 1 FROM conduit_projection_state WHERE target_table = ?1 AND entity_key = ?2",
+            params![table, entity_key],
             |_| Ok(()),
         ) {
             Ok(_) => true,
@@ -132,34 +146,28 @@ impl StorageAdapter for SqliteAdapter {
             return AdapterResult::skipped_version(
                 self.id.clone(),
                 StorageKind::Sql,
-                "event already processed".to_string(),
+                format!("entity {} already projected into '{}'", entity_key, table),
                 source_version,
                 projected_version,
             );
         }
 
-        // Convert JSON values
-        let params: Vec<String> = values
-            .iter()
-            .map(|v| match v {
-                Value::String(s) => s.clone(),
-                Value::Number(n) => n.to_string(),
-                Value::Bool(b) => b.to_string(),
-                Value::Null => String::new(),
-                other => other.to_string(),
-            })
-            .collect();
+        // Convert JSON values to bind params
+        let params: Vec<String> = values.iter().map(json_scalar_to_string).collect();
 
         // Execute projection
         if let Err(e) = tx.execute(&sql, params_from_iter(params.iter())) {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
-        // PHASE 4: record event as processed
+        // PHASE 11.2: record the guard row AFTER the write, same transaction.
+        // `last_sequence` is stored, not compared — first creation wins (no
+        // Upsert/CAS semantics exist yet; see Phase 11 non-goals).
         if let Err(e) = tx.execute(
-            "INSERT INTO conduit_events (event_id, processed_at)
-             VALUES (?, datetime('now'))",
-            params![event.event_id],
+            "INSERT INTO conduit_projection_state
+                (target_table, entity_key, last_sequence, last_event_id, processed_at)
+             VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+            params![table, entity_key, event.sequence as i64, event.event_id],
         ) {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }

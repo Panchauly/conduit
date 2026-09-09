@@ -15,6 +15,11 @@ pub struct Event {
     /// Payload schema version. Unversioned (legacy) events default to 1.
     #[serde(default = "default_event_version")]
     pub version: u32,
+    /// Monotonic per-entity sequence number from the source stream. Required —
+    /// no default — because it is captured now for forward compatibility with a
+    /// future Upsert phase (Phase 11 non-goal); it does not gate accept/reject
+    /// in this phase (see `phases/phase-11-entity-aware-idempotent-insert.md`).
+    pub sequence: u64,
 }
 
 impl Event {
@@ -26,6 +31,9 @@ impl Event {
     }
     pub fn version(&self) -> u32 {
         self.version
+    }
+    pub fn sequence(&self) -> u64 {
+        self.sequence
     }
 }
 
@@ -39,7 +47,8 @@ mod tests {
             "event_id": "e1",
             "event_type": "UserCreated",
             "payload": "{}",
-            "metadata": {}
+            "metadata": {},
+            "sequence": 1
         }"#;
         let event: Event = serde_json::from_str(json).unwrap();
         assert_eq!(event.version(), 1);
@@ -52,9 +61,35 @@ mod tests {
             "event_type": "UserCreated",
             "payload": "{}",
             "metadata": {},
-            "version": 3
+            "version": 3,
+            "sequence": 1
         }"#;
         let event: Event = serde_json::from_str(json).unwrap();
         assert_eq!(event.version(), 3);
+    }
+
+    #[test]
+    fn sequence_is_required_with_no_default() {
+        let json = r#"{
+            "event_id": "e1",
+            "event_type": "UserCreated",
+            "payload": "{}",
+            "metadata": {}
+        }"#;
+        let err = serde_json::from_str::<Event>(json).unwrap_err();
+        assert!(err.to_string().contains("sequence"));
+    }
+
+    #[test]
+    fn explicit_sequence_is_preserved() {
+        let json = r#"{
+            "event_id": "e1",
+            "event_type": "UserCreated",
+            "payload": "{}",
+            "metadata": {},
+            "sequence": 42
+        }"#;
+        let event: Event = serde_json::from_str(json).unwrap();
+        assert_eq!(event.sequence(), 42);
     }
 }

@@ -9,7 +9,7 @@ use conduit_core::runtime::config::MigrationPolicy;
 use conduit_core::upcast::{Upcaster, UpcasterRegistry};
 
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -26,6 +26,7 @@ fn test_event(version: u32) -> Event {
         payload: r#"{ "id": "u1" }"#.to_string(),
         metadata: HashMap::new(),
         version,
+        sequence: 1,
     }
 }
 
@@ -47,19 +48,10 @@ columns:
 
 fn setup_db(db_path: &Path) {
     let conn = Connection::open(db_path).unwrap();
-    conn.execute(
-        "CREATE TABLE users (id TEXT PRIMARY KEY, tier TEXT)",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "CREATE TABLE conduit_events (
-            event_id TEXT PRIMARY KEY,
-            processed_at TEXT NOT NULL
-        )",
-        [],
-    )
-    .unwrap();
+    conn.execute("CREATE TABLE users (id TEXT PRIMARY KEY, tier TEXT)", [])
+        .unwrap();
+    // conduit_projection_state (Phase 11.2 guard) is self-managed by the
+    // adapter via CREATE TABLE IF NOT EXISTS; nothing to set up here.
 }
 
 struct AddDefaultTier;
@@ -133,7 +125,10 @@ fn strict_policy_fails_when_no_upcaster_chain_exists() {
     let result = adapter.handle(&test_event(1));
 
     assert!(!result.success);
-    assert!(matches!(result.error, Some(AdapterError::UnsupportedVersion(_))));
+    assert!(matches!(
+        result.error,
+        Some(AdapterError::UnsupportedVersion(_))
+    ));
     assert_eq!(result.source_version, Some(1));
     assert_eq!(result.projected_version, Some(2));
 
@@ -166,7 +161,10 @@ fn ignore_unmatched_policy_skips_instead_of_failing_the_batch() {
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(count, 0, "no row should be written when projection is skipped");
+    assert_eq!(
+        count, 0,
+        "no row should be written when projection is skipped"
+    );
 }
 
 #[test]
@@ -174,19 +172,10 @@ fn matching_versions_skip_upcasting_entirely() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("test.db");
     let conn = Connection::open(&db_path).unwrap();
-    conn.execute(
-        "CREATE TABLE users (id TEXT PRIMARY KEY, tier TEXT)",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "CREATE TABLE conduit_events (
-            event_id TEXT PRIMARY KEY,
-            processed_at TEXT NOT NULL
-        )",
-        [],
-    )
-    .unwrap();
+    conn.execute("CREATE TABLE users (id TEXT PRIMARY KEY, tier TEXT)", [])
+        .unwrap();
+    // conduit_projection_state (Phase 11.2 guard) is self-managed by the
+    // adapter via CREATE TABLE IF NOT EXISTS; nothing to set up here.
     drop(conn);
 
     let mut mappings = HashMap::new();

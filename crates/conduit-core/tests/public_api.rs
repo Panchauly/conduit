@@ -101,6 +101,7 @@ columns:
 event: UserCreated
 collection: users
 version: 1
+id: payload.id
 document:
   id: payload.id
 "#,
@@ -117,6 +118,7 @@ document:
         payload: r#"{ "id": "u1" }"#.into(),
         metadata: Default::default(),
         version: 1,
+        sequence: 1,
     };
 
     // -----------------------------

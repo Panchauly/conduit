@@ -126,6 +126,35 @@ impl AdapterResult {
     }
 }
 
+/// Canonical string form of a resolved JSON leaf value (Phase 11.1). Shared by
+/// the SQL adapter (legacy string-typed bind params) and the document adapter
+/// (`entity_id` guard key / output filename) so the same payload/metadata
+/// value always canonicalizes the same way across adapters. Objects and
+/// arrays fall back to their JSON text — mapping authors should not use those
+/// as an identity or column value (identity paths reject them outright; see
+/// [`is_identity_scalar`]).
+pub(crate) fn json_scalar_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+/// True for the value types Phase 11 accepts as an entity-identity component
+/// (a document `id`, or one column of a SQL `primary_key`): string, number,
+/// bool. Objects, arrays, and null are rejected — a path that resolves to the
+/// wrong place should fail the build fast, not silently produce `""` or a
+/// JSON blob inside a guard key.
+pub(crate) fn is_identity_scalar(value: &serde_json::Value) -> bool {
+    matches!(
+        value,
+        serde_json::Value::String(_) | serde_json::Value::Number(_) | serde_json::Value::Bool(_)
+    )
+}
+
 pub trait StorageAdapter {
     /// Logical storage family (Sql / Document)
     fn kind(&self) -> StorageKind;

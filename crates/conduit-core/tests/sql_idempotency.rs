@@ -21,6 +21,7 @@ fn test_event() -> Event {
         payload: r#"{ "id": "u1", "email": "a@b.com" }"#.to_string(),
         metadata: HashMap::new(),
         version: 1,
+        sequence: 1,
     }
 }
 
@@ -44,13 +45,8 @@ fn sql_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
             )",
             [],
         )?;
-        conn.execute(
-            "CREATE TABLE conduit_events (
-                event_id TEXT PRIMARY KEY,
-                processed_at TEXT NOT NULL
-            )",
-            [],
-        )?;
+        // conduit_projection_state (Phase 11.2 guard) is self-managed by the
+        // adapter via CREATE TABLE IF NOT EXISTS; nothing to set up here.
     }
 
     // Minimal SQL mapping
