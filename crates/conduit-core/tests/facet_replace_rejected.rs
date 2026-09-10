@@ -77,9 +77,15 @@ columns:
     routing.insert("UserUpserted".to_string(), vec!["sql-primary".into()]);
     routing.insert("UserEmailChanged".to_string(), vec!["sql-primary".into()]);
 
-    let err =
-        validate_projection_config(&config, &routing, &sqlm, &HashMap::new(), &HashMap::new())
-            .unwrap_err();
+    let err = validate_projection_config(
+        &config,
+        &routing,
+        &sqlm,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(
         err.to_string()
             .contains("is faceted, so no mapping may use 'on_existing: replace'"),

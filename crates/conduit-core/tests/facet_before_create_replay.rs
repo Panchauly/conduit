@@ -110,7 +110,14 @@ fn replay_reorders_facet_after_create_by_sequence() {
     rules.insert("UserEmailChanged".to_string(), vec!["doc-readmodel".into()]);
 
     let sql: HashMap<String, SqlMapping> = HashMap::new();
-    let mut ctx = ReplayContext::new(&config, rules, sql, doc_mappings(), HashMap::new());
+    let mut ctx = ReplayContext::new(
+        &config,
+        rules,
+        sql,
+        doc_mappings(),
+        HashMap::new(),
+        HashMap::new(),
+    );
     let report = ctx
         .run_stream(events_from_path(&events_dir).unwrap())
         .unwrap();

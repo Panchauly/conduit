@@ -147,6 +147,9 @@ pub enum AdapterConfig {
 
     #[serde(rename = "keyvalue")]
     KeyValue(KeyValueAdapterConfig),
+
+    #[serde(rename = "graph")]
+    Graph(GraphAdapterConfig),
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,6 +212,26 @@ pub struct KeyValueConfig {
     pub root: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GraphAdapterConfig {
+    pub id: String,
+    pub priority: u32,
+    pub config: GraphConfig,
+
+    /// Optional declared capabilities (Phase 6.4).
+    #[serde(default)]
+    pub capabilities: Option<AdapterCapabilities>,
+
+    /// Adapters that must run before this one (Phase 9); must be on the same route for each event.
+    #[serde(default)]
+    pub depends_on: Vec<AdapterId>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GraphConfig {
+    pub root: String,
+}
+
 // ------------------------------------------------------------
 // Errors
 // ------------------------------------------------------------
@@ -263,6 +286,7 @@ impl AdapterConfig {
             AdapterConfig::Sqlite(cfg) => &cfg.id,
             AdapterConfig::File(cfg) => &cfg.id,
             AdapterConfig::KeyValue(cfg) => &cfg.id,
+            AdapterConfig::Graph(cfg) => &cfg.id,
         }
     }
 
@@ -271,6 +295,7 @@ impl AdapterConfig {
             AdapterConfig::Sqlite(cfg) => cfg.priority,
             AdapterConfig::File(cfg) => cfg.priority,
             AdapterConfig::KeyValue(cfg) => cfg.priority,
+            AdapterConfig::Graph(cfg) => cfg.priority,
         }
     }
 
@@ -280,6 +305,7 @@ impl AdapterConfig {
             AdapterConfig::Sqlite(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::File(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::KeyValue(cfg) => cfg.capabilities.as_deref(),
+            AdapterConfig::Graph(cfg) => cfg.capabilities.as_deref(),
         }
     }
 
@@ -288,6 +314,7 @@ impl AdapterConfig {
             AdapterConfig::Sqlite(cfg) => &cfg.depends_on,
             AdapterConfig::File(cfg) => &cfg.depends_on,
             AdapterConfig::KeyValue(cfg) => &cfg.depends_on,
+            AdapterConfig::Graph(cfg) => &cfg.depends_on,
         }
     }
 }

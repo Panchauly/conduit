@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::dispatch::dispatch_with_routing;
@@ -290,12 +291,14 @@ impl ReplayContext {
     /// Build adapters once (multiple SQL or file adapters each get a clone of the mapping bundle).
     /// Runs with an empty [crate::upcast::UpcasterRegistry]; use [ReplayContext::new_with_upcasters]
     /// to replay mixed-version streams through registered upcasters (Phase 10.3/10.4).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &ConduitConfig,
         routing_rules: HashMap<String, Vec<AdapterId>>,
         sql_mappings: HashMap<String, SqlMapping>,
         document_mappings: HashMap<String, DocumentMapping>,
         kv_mappings: HashMap<String, KvMapping>,
+        graph_mappings: HashMap<String, GraphMapping>,
     ) -> Self {
         Self::new_with_upcasters(
             config,
@@ -303,17 +306,20 @@ impl ReplayContext {
             sql_mappings,
             document_mappings,
             kv_mappings,
+            graph_mappings,
             std::sync::Arc::new(crate::upcast::UpcasterRegistry::new()),
         )
     }
 
     /// Same as [ReplayContext::new], with an explicit [crate::upcast::UpcasterRegistry].
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_upcasters(
         config: &ConduitConfig,
         routing_rules: HashMap<String, Vec<AdapterId>>,
         sql_mappings: HashMap<String, SqlMapping>,
         document_mappings: HashMap<String, DocumentMapping>,
         kv_mappings: HashMap<String, KvMapping>,
+        graph_mappings: HashMap<String, GraphMapping>,
         upcasters: std::sync::Arc<crate::upcast::UpcasterRegistry>,
     ) -> Self {
         Self {
@@ -322,6 +328,7 @@ impl ReplayContext {
                 sql_mappings,
                 document_mappings,
                 kv_mappings,
+                graph_mappings,
                 upcasters,
             ),
             failure_policy: config.failure_policy,
@@ -423,12 +430,14 @@ impl ReplayContext {
 }
 
 /// Build context and run stream. Fails on first event load error.
+#[allow(clippy::too_many_arguments)]
 pub fn replay_stream(
     config: &ConduitConfig,
     routing_rules: HashMap<String, Vec<AdapterId>>,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
+    graph_mappings: HashMap<String, GraphMapping>,
     events: impl Iterator<Item = Result<Event, ReplayLoadError>>,
 ) -> Result<ReplayReport, ReplayLoadError> {
     replay_stream_with_options(
@@ -437,17 +446,20 @@ pub fn replay_stream(
         sql_mappings,
         document_mappings,
         kv_mappings,
+        graph_mappings,
         events,
         &ReplayRunOptions::default(),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn replay_stream_with_options(
     config: &ConduitConfig,
     routing_rules: HashMap<String, Vec<AdapterId>>,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
+    graph_mappings: HashMap<String, GraphMapping>,
     events: impl Iterator<Item = Result<Event, ReplayLoadError>>,
     opts: &ReplayRunOptions,
 ) -> Result<ReplayReport, ReplayLoadError> {
@@ -457,6 +469,7 @@ pub fn replay_stream_with_options(
         sql_mappings,
         document_mappings,
         kv_mappings,
+        graph_mappings,
     );
     ctx.run_stream_with_options(events, opts)
 }

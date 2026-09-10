@@ -138,6 +138,7 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
         sql_mappings.clone(),
         HashMap::new(),
         HashMap::new(),
+        HashMap::new(),
     );
     let mut iter = events_from_path(&events_dir).unwrap();
     let report = ctx.run_stream(&mut iter).unwrap();
@@ -189,6 +190,7 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
         let report = execute_event(
             &live_config,
             sql_mappings.clone(),
+            HashMap::new(),
             HashMap::new(),
             HashMap::new(),
             event,

@@ -5,6 +5,9 @@ use crate::adapter::StorageAdapter;
 use crate::adapter::document::file::FileDocumentAdapter;
 use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::document::runtime::DocumentRuntimeBuilder;
+use crate::adapter::graph::mapping::GraphMapping;
+use crate::adapter::graph::runtime::GraphRuntimeBuilder;
+use crate::adapter::graph::store::GraphStore;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use crate::adapter::keyvalue::store::KeyValueStore;
@@ -22,11 +25,13 @@ use crate::runtime::config::{AdapterConfig, ConduitConfig};
 ///
 /// `upcasters` is shared (via `Arc`) across every adapter instance; `config.migration_policy`
 /// governs how each adapter reacts when no upcaster chain exists to its mapping's target version.
+#[allow(clippy::too_many_arguments)]
 pub fn build_adapters_from_config(
     config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
+    graph_mappings: HashMap<String, GraphMapping>,
     upcasters: Arc<UpcasterRegistry>,
 ) -> Vec<Box<dyn StorageAdapter>> {
     let mut adapters: Vec<Box<dyn StorageAdapter>> = Vec::new();
@@ -60,6 +65,18 @@ pub fn build_adapters_from_config(
             AdapterConfig::KeyValue(cfg) => {
                 let builder = KvRuntimeBuilder::new(kv_mappings.clone());
                 adapters.push(Box::new(KeyValueStore::new(
+                    cfg.id.clone(),
+                    cfg.config.root.clone().into(),
+                    cfg.priority,
+                    builder,
+                    Arc::clone(&upcasters),
+                    config.migration_policy,
+                )));
+            }
+
+            AdapterConfig::Graph(cfg) => {
+                let builder = GraphRuntimeBuilder::new(graph_mappings.clone());
+                adapters.push(Box::new(GraphStore::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
                     cfg.priority,

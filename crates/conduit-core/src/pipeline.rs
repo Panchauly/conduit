@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crate::adapter::document::loader::load_document_mappings;
 use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::graph::loader::load_graph_mappings;
+use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::loader::load_keyvalue_mappings;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::loader::load_sql_mappings;
@@ -117,20 +119,22 @@ pub fn load_config(path: &Path) -> Result<ConduitConfig, PipelineError> {
     Ok(config)
 }
 
-/// SQL, document, and key-value mapping tables keyed by event type.
+/// SQL, document, key-value, and graph mapping tables keyed by event type.
 pub type LoadedMappings = (
     HashMap<String, SqlMapping>,
     HashMap<String, DocumentMapping>,
     HashMap<String, KvMapping>,
+    HashMap<String, GraphMapping>,
 );
 
-/// Load SQL, document, and key-value mappings from `<mappings_dir>/sql`,
-/// `<mappings_dir>/document`, and `<mappings_dir>/keyvalue`.
+/// Load SQL, document, key-value, and graph mappings from `<mappings_dir>/sql`,
+/// `<mappings_dir>/document`, `<mappings_dir>/keyvalue`, and
+/// `<mappings_dir>/graph`.
 ///
 /// `sql/` and `document/` are mandatory (Phase 3/11 convention — always
-/// present, empty is fine). `keyvalue/` (Phase 14) is optional: a project
-/// with no key-value mappings need not create the directory at all, so
-/// adopting Phase 14 doesn't force a change on every existing project.
+/// present, empty is fine). `keyvalue/` (Phase 14) and `graph/` (Phase 16) are
+/// optional: a project with none of that kind need not create the directory,
+/// so adopting a later phase doesn't force a change on every existing project.
 pub fn load_mappings(mappings_dir: &Path) -> Result<LoadedMappings, PipelineError> {
     let sql = load_sql_mappings(mappings_dir.join("sql")).map_err(PipelineError::Mapping)?;
     let doc =
@@ -141,7 +145,13 @@ pub fn load_mappings(mappings_dir: &Path) -> Result<LoadedMappings, PipelineErro
     } else {
         HashMap::new()
     };
-    Ok((sql, doc, kv))
+    let graph_dir = mappings_dir.join("graph");
+    let graph = if graph_dir.is_dir() {
+        load_graph_mappings(&graph_dir).map_err(PipelineError::Mapping)?
+    } else {
+        HashMap::new()
+    };
+    Ok((sql, doc, kv, graph))
 }
 
 /// Load a single [Event] from a JSON file.
@@ -156,6 +166,7 @@ pub struct LoadedProject {
     pub sql_mappings: HashMap<String, SqlMapping>,
     pub doc_mappings: HashMap<String, DocumentMapping>,
     pub kv_mappings: HashMap<String, KvMapping>,
+    pub graph_mappings: HashMap<String, GraphMapping>,
     pub routing_rules: HashMap<String, Vec<AdapterId>>,
 }
 
@@ -165,7 +176,7 @@ pub fn load_project(
     mappings_dir: &Path,
 ) -> Result<LoadedProject, PipelineError> {
     let config = load_config(config_path)?;
-    let (sql_mappings, doc_mappings, kv_mappings) = load_mappings(mappings_dir)?;
+    let (sql_mappings, doc_mappings, kv_mappings, graph_mappings) = load_mappings(mappings_dir)?;
     let routing_path = resolve_routing_path(config_path, &config.routing.file);
     let routing_rules = load_routing(&routing_path).map_err(PipelineError::Routing)?;
     validate_projection_config(
@@ -174,12 +185,14 @@ pub fn load_project(
         &sql_mappings,
         &doc_mappings,
         &kv_mappings,
+        &graph_mappings,
     )?;
     Ok(LoadedProject {
         config,
         sql_mappings,
         doc_mappings,
         kv_mappings,
+        graph_mappings,
         routing_rules,
     })
 }
@@ -201,6 +214,7 @@ pub fn run(
         project.sql_mappings,
         project.doc_mappings,
         project.kv_mappings,
+        project.graph_mappings,
         event,
     ))
 }
@@ -218,6 +232,7 @@ pub fn dry_run(
         project.sql_mappings,
         project.doc_mappings,
         project.kv_mappings,
+        project.graph_mappings,
         event,
         ExecutionMode::DryRun,
     ))
@@ -245,8 +260,8 @@ pub fn explain(
     let routing_path = resolve_routing_path(config_path, &config.routing.file);
     let rules = load_routing(&routing_path).map_err(PipelineError::Routing)?;
     if let Some(dir) = mappings_dir {
-        let (sql, doc, kv) = load_mappings(dir)?;
-        validate_projection_config(&config, &rules, &sql, &doc, &kv)?;
+        let (sql, doc, kv, graph) = load_mappings(dir)?;
+        validate_projection_config(&config, &rules, &sql, &doc, &kv, &graph)?;
     }
 
     let execution_order =
@@ -291,6 +306,7 @@ pub fn replay(
         project.sql_mappings,
         project.doc_mappings,
         project.kv_mappings,
+        project.graph_mappings,
     );
     Ok(ctx.run_stream_with_options(&mut iter, opts)?)
 }

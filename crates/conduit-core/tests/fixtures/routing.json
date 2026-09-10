@@ -13,5 +13,9 @@
   "UserCacheSynced": [
     "sql-primary",
     "kv-cache"
+  ],
+  "UserGraphSynced": [
+    "sql-primary",
+    "graph-social"
   ]
 }

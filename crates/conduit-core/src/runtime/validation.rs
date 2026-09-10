@@ -4,6 +4,7 @@ use core::fmt;
 use std::collections::{HashMap, HashSet};
 
 use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::adapter::{OnExisting, Operation};
@@ -31,6 +32,10 @@ pub enum ValidationIssue {
         event: String,
         reason: String,
     },
+    InvalidGraphMapping {
+        event: String,
+        reason: String,
+    },
     UnknownAdapter {
         event_type: String,
         adapter_id: String,
@@ -44,6 +49,10 @@ pub enum ValidationIssue {
         adapter_id: String,
     },
     MissingKvMapping {
+        event_type: String,
+        adapter_id: String,
+    },
+    MissingGraphMapping {
         event_type: String,
         adapter_id: String,
     },
@@ -72,6 +81,14 @@ pub enum ValidationIssue {
     },
     /// Event is routed but no key-value adapter on the route (mapping unreachable).
     KvMappingNoKeyValueTarget {
+        event: String,
+    },
+    /// Graph mapping exists but event type is not in routing.
+    UnroutedGraphMapping {
+        event: String,
+    },
+    /// Event is routed but no graph adapter on the route (mapping unreachable).
+    GraphMappingNoGraphTarget {
         event: String,
     },
     /// HashMap key must match `event` field (routing and lookups use the key).
@@ -153,6 +170,9 @@ impl fmt::Display for ValidationIssue {
                     event, reason
                 )
             }
+            ValidationIssue::InvalidGraphMapping { event, reason } => {
+                write!(f, "invalid graph mapping for event {:?}: {}", event, reason)
+            }
             ValidationIssue::UnknownAdapter {
                 event_type,
                 adapter_id,
@@ -190,6 +210,16 @@ impl fmt::Display for ValidationIssue {
                 write!(
                     f,
                     "routing: event {:?} targets key-value adapter {:?} but no key-value mapping exists for that event",
+                    event_type, adapter_id
+                )
+            }
+            ValidationIssue::MissingGraphMapping {
+                event_type,
+                adapter_id,
+            } => {
+                write!(
+                    f,
+                    "routing: event {:?} targets graph adapter {:?} but no graph mapping exists for that event",
                     event_type, adapter_id
                 )
             }
@@ -242,6 +272,20 @@ impl fmt::Display for ValidationIssue {
                 write!(
                     f,
                     "key-value mapping for event {:?} has no key-value adapter on its route",
+                    event
+                )
+            }
+            ValidationIssue::UnroutedGraphMapping { event } => {
+                write!(
+                    f,
+                    "graph mapping for event {:?} is never routed (add route or remove mapping)",
+                    event
+                )
+            }
+            ValidationIssue::GraphMappingNoGraphTarget { event } => {
+                write!(
+                    f,
+                    "graph mapping for event {:?} has no graph adapter on its route",
                     event
                 )
             }
@@ -421,6 +465,14 @@ fn is_file(a: &AdapterConfig) -> bool {
 
 fn is_keyvalue(a: &AdapterConfig) -> bool {
     matches!(a, AdapterConfig::KeyValue(_))
+}
+
+fn is_graph(a: &AdapterConfig) -> bool {
+    matches!(a, AdapterConfig::Graph(_))
+}
+
+fn is_scalar_path(p: &str) -> bool {
+    p.starts_with("payload.") || p.starts_with("metadata.")
 }
 
 /// When unset or empty, adapter is treated as declaring only `Write`.
@@ -659,12 +711,14 @@ pub fn validate_routing_and_dependencies_for_event_type(
 }
 
 /// Full Phase 8 validation: routing ↔ adapters ↔ mappings ↔ capabilities, plus orphan mappings.
+#[allow(clippy::too_many_arguments)]
 pub fn validate_projection_config(
     config: &ConduitConfig,
     routing: &HashMap<String, Vec<AdapterId>>,
     sql: &HashMap<String, SqlMapping>,
     doc: &HashMap<String, DocumentMapping>,
     kv: &HashMap<String, KvMapping>,
+    graph: &HashMap<String, GraphMapping>,
 ) -> Result<(), ValidationReport> {
     let mut report = ValidationReport::default();
     let adapters_by_id = build_adapter_by_id(config, &mut report);
@@ -850,8 +904,69 @@ pub fn validate_projection_config(
         }
     }
 
+    // Phase 16.5: graph mapping structural checks (folded into the live
+    // validator, per the Phase 14 finding that `*/validate.rs` are dead code).
+    for (key, m) in graph {
+        if key != m.event() {
+            report.push(ValidationIssue::MappingKeyMismatch {
+                map_key: key.clone(),
+                event_field: m.event().to_string(),
+                kind: "graph",
+            });
+        }
+        let mut push = |reason: &str| {
+            report.push(ValidationIssue::InvalidGraphMapping {
+                event: key.clone(),
+                reason: reason.to_string(),
+            });
+        };
+        match m {
+            GraphMapping::Node(n) => {
+                if n.label.trim().is_empty() {
+                    push("empty label");
+                } else if !is_scalar_path(&n.key) {
+                    push("key must be a 'payload.' or 'metadata.' path");
+                } else if n.operation == Operation::Upsert && document_template_empty(&n.properties)
+                {
+                    push("node properties must not be empty for an upsert mapping");
+                } else if n.operation == Operation::Delete
+                    && !document_template_empty(&n.properties)
+                {
+                    push("delete mapping's properties must be empty");
+                } else if n.operation == Operation::Delete && n.facet.is_some() {
+                    push("operation: delete is only valid on the default facet");
+                } else if n.version < 1 {
+                    push("version must be >= 1");
+                }
+            }
+            GraphMapping::Edge(e) => {
+                if e.edge_type.trim().is_empty() {
+                    push("empty edge_type");
+                } else if !is_scalar_path(&e.from) {
+                    push("from must be a 'payload.' or 'metadata.' path");
+                } else if !is_scalar_path(&e.to) {
+                    push("to must be a 'payload.' or 'metadata.' path");
+                } else if e
+                    .discriminator
+                    .as_deref()
+                    .is_some_and(|d| !is_scalar_path(d))
+                {
+                    push("discriminator must be a 'payload.' or 'metadata.' path");
+                } else if e.operation == Operation::Delete
+                    && !document_template_empty(&e.properties)
+                {
+                    // An edge with no properties is a valid bare relationship;
+                    // only a delete mapping is required to carry none.
+                    push("delete mapping's properties must be empty");
+                } else if e.version < 1 {
+                    push("version must be >= 1");
+                }
+            }
+        }
+    }
+
     // Phase 15.1: facet declaration & ownership validation, one entity group at
-    // a time (a group is a table / collection / namespace).
+    // a time (a group is a table / collection / namespace / node label).
     {
         fn object_keys(v: &serde_json::Value) -> Vec<String> {
             v.as_object()
@@ -901,6 +1016,22 @@ pub fn validate_projection_config(
                 fields: object_keys(&m.value),
                 kind: "key-value",
             });
+        }
+        for m in graph.values() {
+            // Only nodes are faceted (Phase 16.1); an edge contributes no view.
+            if let GraphMapping::Node(n) = m {
+                let identity = vec![n.key.clone()];
+                views.push(FacetView {
+                    event: n.event.clone(),
+                    entity: n.label.clone(),
+                    facet: n.facet.as_deref().unwrap_or("").to_string(),
+                    on_existing: n.on_existing,
+                    operation: n.operation,
+                    identity,
+                    fields: object_keys(&n.properties),
+                    kind: "graph node",
+                });
+            }
         }
         validate_facets(views, &mut report);
     }
@@ -981,6 +1112,28 @@ pub fn validate_projection_config(
                         missing,
                     });
                 }
+            } else if is_graph(ac) {
+                let Some(graph_map) = graph.get(event_type) else {
+                    report.push(ValidationIssue::MissingGraphMapping {
+                        event_type: event_type.clone(),
+                        adapter_id: adapter_id.clone(),
+                    });
+                    continue;
+                };
+                let eff = effective_capabilities(ac);
+                let required = required_capabilities(
+                    graph_map.requires_capabilities(),
+                    graph_map.on_existing(),
+                    graph_map.operation(),
+                );
+                let missing: Vec<_> = required.into_iter().filter(|c| !eff.contains(c)).collect();
+                if !missing.is_empty() {
+                    report.push(ValidationIssue::CapabilityMismatch {
+                        event_type: event_type.clone(),
+                        adapter_id: adapter_id.clone(),
+                        missing,
+                    });
+                }
             }
         }
     }
@@ -1043,6 +1196,27 @@ pub fn validate_projection_config(
         });
         if !has_keyvalue {
             report.push(ValidationIssue::KvMappingNoKeyValueTarget {
+                event: event.clone(),
+            });
+        }
+    }
+
+    for event in graph.keys() {
+        let Some(ids) = routing.get(event) else {
+            report.push(ValidationIssue::UnroutedGraphMapping {
+                event: event.clone(),
+            });
+            continue;
+        };
+        let has_graph = ids.iter().any(|id| {
+            adapters_by_id
+                .get(id.as_str())
+                .copied()
+                .map(is_graph)
+                .unwrap_or(false)
+        });
+        if !has_graph {
+            report.push(ValidationIssue::GraphMappingNoGraphTarget {
                 event: event.clone(),
             });
         }

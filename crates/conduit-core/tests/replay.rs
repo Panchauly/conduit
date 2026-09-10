@@ -190,7 +190,7 @@ fn replay_directory_sorted_order_two_user_created() {
     let rules = rules_user_created();
 
     let mut iter = events_from_path(&events_dir).unwrap();
-    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new());
+    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
     let report = ctx.run_stream(&mut iter).unwrap();
 
     assert_eq!(report.events_processed, 2);
@@ -241,7 +241,7 @@ fn replay_ndjson_file() {
     let rules = rules_user_created();
 
     let mut iter = events_from_path(&f).unwrap();
-    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new());
+    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
     let report = ctx.run_stream(&mut iter).unwrap();
 
     assert_eq!(report.events_processed, 2);
@@ -292,7 +292,7 @@ fn replay_fail_fast_stops_after_second_event_failure() {
     let rules = rules_user_created_and_failing();
 
     let mut iter = events_from_path(&events_dir).unwrap();
-    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new());
+    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
     let report = ctx.run_stream(&mut iter).unwrap();
 
     assert_eq!(report.events_processed, 2, "{:?}", report.per_event);
@@ -340,7 +340,7 @@ fn replay_continue_on_error_processes_all() {
     let rules = rules_user_created_and_failing();
 
     let mut iter = events_from_path(&events_dir).unwrap();
-    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new());
+    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
     let report = ctx.run_stream(&mut iter).unwrap();
 
     assert_eq!(report.events_processed, 3);
@@ -381,7 +381,7 @@ fn replay_max_per_event_summaries_caps_success_rows() {
     let rules = rules_user_created();
 
     let mut iter = events_from_path(&events_dir).unwrap();
-    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new());
+    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
     let opts = ReplayRunOptions {
         max_per_event_summaries: Some(1),
         ..Default::default()
@@ -422,7 +422,7 @@ fn replay_validate_routing_fails_unknown_event_type() {
     let rules = rules_user_created();
 
     let mut iter = events_from_path(&f).unwrap();
-    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new());
+    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
     let opts = ReplayRunOptions {
         validate_routing: true,
         ..Default::default()
@@ -494,7 +494,7 @@ fn replay_user_created_writes_two_sqlite_adapters() {
     )
     .unwrap();
 
-    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new());
+    let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
     let report = ctx.run_stream(events_from_path(&f).unwrap()).unwrap();
 
     assert_eq!(report.events_succeeded, 1, "{:?}", report.per_event);

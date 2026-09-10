@@ -27,16 +27,16 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 13 | Deletion & Tombstones (13.1–13.6) | ✅ Completed | [phases/phase-13-deletion-tombstones.md](phases/phase-13-deletion-tombstones.md) |
 | 14 | Cache Adapter (Key-Value) (14.1–14.5) | ✅ Completed | [phases/phase-14-cache-adapter.md](phases/phase-14-cache-adapter.md) |
 | 15 | Facet Partial Updates (15.1–15.6) | ✅ Completed | [phases/phase-15-facet-partial-updates.md](phases/phase-15-facet-partial-updates.md) |
+| 16 | Graph Adapter (Nodes & Edges) (16.1–16.6) | ✅ Completed | [phases/phase-16-graph-adapter.md](phases/phase-16-graph-adapter.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md)
 
 ---
 
-## Beyond Phase 15
+## Beyond Phase 16
 
-Candidate future phases, not yet planned in detail:
+All four storage kinds from the project pitch now exist — SQL, Document, Key-Value, and Graph adapters are implemented (file-backed), each driven by the same `decide()` core, sequence-gated guard, facet model, and capability checks. Candidate future work, not yet planned in detail:
 
-- **Phase 16** — Graph adapter (`StorageKind::Graph` — already routed, no adapter yet)
-- **Later backends** — Postgres SQL backend, Redis key-value backend (both currently single-implementation, like SQLite / file-backed).
-
-SQL, Document, and Key-Value (file-backed) adapters are implemented. The Graph adapter — named in the project pitch — does not exist yet.
+- **Later backends** — Postgres SQL backend, Redis key-value backend, Neo4j/Cypher graph backend (each currently single-implementation, like SQLite / file-backed).
+- **Subgraph-per-event** — one mapping emitting several graph records atomically (deferred out of Phase 16).
+- **Housekeeping** — delete dead `sql/validate.rs` + `document/validate.rs`; set `workspace.resolver`; `RELEASES/` note for phases 11–16.

@@ -1,4 +1,5 @@
 pub mod document;
+pub mod graph;
 pub mod keyvalue;
 pub mod sql;
 
