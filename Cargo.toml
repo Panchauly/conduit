@@ -2,5 +2,7 @@
 resolver = "3"
 members = [
     "crates/conduit-core",
-    "crates/conduit-cli"
+    "crates/conduit-cli",
+    "crates/conduit-ingest",
+    "crates/conduit-client",
 ]

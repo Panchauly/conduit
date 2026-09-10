@@ -31,17 +31,19 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 17 | Event Sources (17.1–17.6) | ✅ Completed | [phases/phase-17-event-sources.md](phases/phase-17-event-sources.md) |
 | 18 | Consolidation & Release Hygiene (18.1–18.8) | ✅ Completed | [phases/phase-18-consolidation-release-hygiene.md](phases/phase-18-consolidation-release-hygiene.md) |
 | 19 | Postgres SQL Backend (19.1–19.6) | ✅ Completed | [phases/phase-19-postgres-sql-backend.md](phases/phase-19-postgres-sql-backend.md) |
+| 20 | gRPC Ingestion Service (20.1–20.5) | ✅ Completed | [phases/phase-20-grpc-ingestion.md](phases/phase-20-grpc-ingestion.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md) · Engine/producer boundary: [phases/producer-contract.md](phases/producer-contract.md)
 
 ---
 
-## Beyond Phase 19
+## Beyond Phase 20
 
-All four storage kinds from the project pitch exist (Phases 11–16, file-backed, one `decide()` core), the symmetric source side exists (Phase 17), and the debt from that run is paid down (Phase 18). Conduit is **projection-only** — it consumes a log it does not own; producing / storing the log is permanently out of scope ([`architecture.md` §1.1](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
+All four storage kinds from the project pitch exist (Phases 11–16, file-backed, one `decide()` core), the symmetric source side exists (Phase 17), the debt from that run is paid down (Phase 18), the SQL sink is production-real on Postgres (Phase 19), and the technology-agnostic producer contract is defined (Phase 20). Conduit is **projection-only** and structured in three parts with distinct dependency rules ([`architecture.md` §1.1–1.4](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
 
 Candidate future work, not yet planned in detail:
 
-- **Later backends** — Postgres SQL backend landed in Phase 19; a Redis key-value backend and a Neo4j/Cypher graph backend are still open (each adapter is otherwise single-implementation, like the file-backed default).
-- **Later sources** — Kafka, Postgres-outbox, and HTTP-ingest sources on the Phase 17 `EventSource` trait. A source whose backing system owns offsets (Kafka consumer group, log cursor) uses *that*, not Conduit's checkpoint file (Phase 18.8).
+- **Later OSS backends** — a Redis key-value backend and a Neo4j/Cypher graph backend (each adapter is otherwise single-implementation, like the file-backed default).
+- **Pro modules** — native Kafka / Kinesis `EventSource` implementations, a distributed multi-node coordinator, compliance/audit encryption adapters, a visual `conduit explain` topology UI ([`architecture.md` §1.4](architecture.md)).
+- **`conduit-core` dependency weight** — Phase 19 (`postgres`/`tokio`) and Phase 20 (nothing, `tonic` is isolated in `conduit-ingest`) mean the embeddable crate now pulls `tokio` transitively via `postgres`; a feature gate to drop the Postgres backend for lean embedded use is open.
 - **Subgraph-per-event** — one mapping emitting several graph records atomically (deferred out of Phase 16).

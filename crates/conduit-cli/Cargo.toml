@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 conduit-core = { path = "../conduit-core" }
+conduit-ingest = { path = "../conduit-ingest" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1.0"
 ctrlc = "3"

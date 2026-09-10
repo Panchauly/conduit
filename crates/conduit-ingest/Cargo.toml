@@ -1,0 +1,23 @@
+[package]
+name = "conduit-ingest"
+version = "0.6.0"
+edition = "2024"
+
+[dependencies]
+conduit-core = { path = "../conduit-core" }
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "net", "macros", "time"] }
+tokio-stream = { version = "0.1", features = ["sync", "net"] }
+futures-core = "0.3"
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+conduit-client = { path = "../conduit-client" }
+serde_json = "1.0"
+serde_yaml = "0.9"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"

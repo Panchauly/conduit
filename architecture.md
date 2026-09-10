@@ -29,6 +29,40 @@ Everything Conduit relies on from the application and transport — a monotonic 
 
 ---
 
+## 1.2 The three parts
+
+Conduit is three parts, and each has a different dependency rule:
+
+| Part | What it is | Dependency rule |
+|------|-----------|-----------------|
+| **1. Storage adapters** | speak each target store's own wire protocol (SQLite, Postgres, and later Redis, Neo4j) | **Dependencies are forced** — the client already runs these databases; Conduit must speak them |
+| **2. Mapping & verification** | declarative YAML — routing, mappings, capabilities, versions — validated before runtime | **Technology-agnostic, dependency-free** — `serde` over YAML, no engine lock-in |
+| **3. Producer ingestion** | how events reach the engine | **No technology lock-in** — Conduit's own contract (a gRPC `.proto`); never "you must use Kafka / a database / a broker" |
+
+Part 3's ingestion contract is Conduit-defined and neutral. Concrete transports — a gRPC stream, a file directory, later Kafka or Kinesis — are `EventSource` implementations behind that contract; none is privileged and none is a core dependency.
+
+---
+
+## 1.3 Deployment modes
+
+| Mode | How events arrive | Use |
+|------|-------------------|-----|
+| **Embedded crate** — `conduit-core` linked into a larger service | direct function call (`execute_event`) — no protocol | the host service already owns the command path and wants projection in-process |
+| **Sidecar binary** — one statically-linked `conduit` process (e.g. a Kubernetes pod sidecar) | the gRPC ingestion service (Unix domain socket in-pod, or TCP); the app streams events via generated stubs | language-agnostic; the app and Conduit are decoupled processes |
+
+Both modes run the identical core engine. Ingestion is stateless — Conduit acks a position after each batch's guards commit; the producer owns replay from the last ack.
+
+---
+
+## 1.4 Distribution (open-core)
+
+- **Open source (MIT / Apache-2.0):** the core engine and `conduit-core` crate; the gRPC ingestion service, its `.proto` contract, and a reference client; the `file` / `stdin` / `directory` sources; the SQL, document, key-value, and graph adapters (file-backed, plus the SQLite and Postgres SQL backends).
+- **Pro / Enterprise:** managed cloud connectors (native Kafka / Kinesis `EventSource` implementations), a distributed multi-node coordinator, compliance/audit encryption adapters, and a visual UI for `conduit explain` topology and execution debugging.
+
+Both tiers target the same `EventSource` trait and the same engine API. The `.proto` is the public ingestion contract regardless of tier.
+
+---
+
 ## 2. Core Architectural Principles
 
 ### 2.1 Event-First
