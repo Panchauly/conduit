@@ -32,6 +32,7 @@ fn config_with_kv_capabilities(capabilities: Option<Vec<AdapterCapability>>) -> 
         })],
         failure_policy: Default::default(),
         migration_policy: Default::default(),
+        sources: Vec::new(),
     }
 }
 

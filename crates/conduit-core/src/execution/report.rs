@@ -117,6 +117,18 @@ pub struct ExecutionReport {
     /// Source event payload version (Phase 10.2/10.3). Unversioned legacy events default to 1.
     #[serde(default = "default_source_version")]
     pub source_version: u32,
+
+    /// Phase 17.4: the [`EventSource`](crate::source::EventSource) id this event
+    /// was polled from, when it was dispatched by the source run loop rather
+    /// than a one-shot `run`/`dry-run`. Observability only — routing is by
+    /// `event_type` regardless of source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+
+    /// Phase 17.4: the [`SourcePosition`](crate::source::SourcePosition) string
+    /// for this event — the position a `commit` past this event would record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_position: Option<String>,
 }
 
 fn default_report_version() -> String {
@@ -146,12 +158,25 @@ impl ExecutionReport {
             adapter_reports: Vec::new(),
             status: ExecutionStatus::Succeeded, // provisional, recalculated on finish
             source_version: default_source_version(),
+            source_id: None,
+            source_position: None,
         }
     }
 
     /// Set the source event payload version (defaults to 1 if never called).
     pub fn with_source_version(mut self, source_version: u32) -> Self {
         self.source_version = source_version;
+        self
+    }
+
+    /// Phase 17.4: attach the source id + position this event was polled from.
+    pub fn with_source(
+        mut self,
+        source_id: impl Into<String>,
+        position: impl Into<String>,
+    ) -> Self {
+        self.source_id = Some(source_id.into());
+        self.source_position = Some(position.into());
         self
     }
 

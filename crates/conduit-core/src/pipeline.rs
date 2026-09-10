@@ -23,13 +23,18 @@ use crate::replay::{
     ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptions, events_from_path,
 };
 use crate::routing::{AdapterId, load_routing, route_with_rules};
-use crate::runtime::config::{ConduitConfig, ConfigError};
+use crate::runtime::config::{ConduitConfig, ConfigError, SourceConfig};
 use crate::runtime::{
     ValidationReport, adapter_metadata_map, dependency_depth_exceeds_recommended,
     dependency_layers_grouped, dependency_layers_parallel, validate_projection_config,
     validate_routing_and_dependencies_for_event_type,
 };
+use crate::source::directory::DirectorySource;
+use crate::source::runner::{SourceRunOptions, SourceRunReport, run_sources};
+use crate::source::stdin::StdinSource;
+use crate::source::{EventSource, SourceError};
 use crate::{execute_event, execute_event_with_mode};
+use std::sync::atomic::AtomicBool;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -45,6 +50,7 @@ pub enum PipelineError {
     Validation(ValidationReport),
     EventParse(String),
     Replay(ReplayLoadError),
+    Source(SourceError),
 }
 
 impl fmt::Display for PipelineError {
@@ -58,6 +64,7 @@ impl fmt::Display for PipelineError {
             PipelineError::Validation(report) => write!(f, "{}", report),
             PipelineError::EventParse(msg) => write!(f, "failed to parse event: {}", msg),
             PipelineError::Replay(e) => write!(f, "{}", e),
+            PipelineError::Source(e) => write!(f, "{}", e),
         }
     }
 }
@@ -69,8 +76,15 @@ impl std::error::Error for PipelineError {
             PipelineError::Config(e) => Some(e),
             PipelineError::Validation(e) => Some(e),
             PipelineError::Replay(e) => Some(e),
+            PipelineError::Source(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl From<SourceError> for PipelineError {
+    fn from(e: SourceError) -> Self {
+        PipelineError::Source(e)
     }
 }
 
@@ -289,6 +303,82 @@ pub fn explain(
         execution_layers,
         depth_warning,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 17: source loop
+// ---------------------------------------------------------------------------
+
+/// Build the configured [`EventSource`]s, resolving `path` / `state_dir`
+/// relative to the config file's directory (same rule as the routing file).
+pub fn build_sources(
+    config: &ConduitConfig,
+    config_path: &Path,
+) -> Result<Vec<Box<dyn EventSource>>, PipelineError> {
+    let base = config_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut out: Vec<Box<dyn EventSource>> = Vec::new();
+    for sc in &config.sources {
+        let source: Box<dyn EventSource> = match sc {
+            SourceConfig::Directory(d) => Box::new(DirectorySource::new(
+                d.id.clone(),
+                base.join(&d.path),
+                base.join(&d.state_dir),
+            )?),
+            SourceConfig::Stdin(s) => Box::new(StdinSource::new(
+                s.id.clone(),
+                base.join(&s.state_dir),
+                std::io::BufReader::new(std::io::stdin()),
+            )?),
+        };
+        out.push(source);
+    }
+    Ok(out)
+}
+
+/// Phase 17.4: configured sources and their committed positions, for
+/// `conduit sources`.
+pub fn list_sources(config_path: &Path) -> Result<Vec<(String, Option<String>)>, PipelineError> {
+    let config = load_config(config_path)?;
+    let sources = build_sources(&config, config_path)?;
+    Ok(sources
+        .iter()
+        .map(|s| {
+            (
+                s.id().to_string(),
+                s.committed_position().map(|p| p.as_str().to_string()),
+            )
+        })
+        .collect())
+}
+
+/// Phase 17.3: load the project, build its sources, and run the
+/// `poll → sort → dispatch → commit` loop until caught up (`RunMode::Once`),
+/// shut down (`stop`), or halted by a retry-exhausted batch.
+pub fn run_source_loop(
+    config_path: &Path,
+    mappings_dir: &Path,
+    opts: &SourceRunOptions,
+    stop: &AtomicBool,
+) -> Result<SourceRunReport, PipelineError> {
+    let project = load_project(config_path, mappings_dir)?;
+    let sources = build_sources(&project.config, config_path)?;
+    if sources.is_empty() {
+        return Err(PipelineError::Mapping(
+            "no sources configured — add `sources:` to the config, or use `run --event <file>`"
+                .to_string(),
+        ));
+    }
+    Ok(run_sources(
+        &project.config,
+        project.routing_rules,
+        project.sql_mappings,
+        project.doc_mappings,
+        project.kv_mappings,
+        project.graph_mappings,
+        sources,
+        opts,
+        stop,
+    )?)
 }
 
 /// Replay a directory/file of events through the full pipeline.
