@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+// Conduit's technology-agnostic producer contract (Phase 20). A producer in
+// any language runs `protoc` / `buf` over this file to get a client, streams
+// events, and gets back a durable position ack. Versioned: breaking changes
+// get `conduit/v2`.
+package conduit.v1;
+
+service Ingest {
+  // Bidirectional: the producer streams events, Conduit streams position acks.
+  // One `Stream` call is one logical producer session. Concurrent sessions are
+  // allowed but must own disjoint entity sets (see producer-contract.md).
+  rpc Stream(stream EventEnvelope) returns (stream Ack);
+}
+
+// Maps 1:1 onto a Conduit `Event` — decode is the same path as an NDJSON line.
+message EventEnvelope {
+  string event_type = 1;
+  // JSON, exactly as the file sources carry it.
+  string payload = 2;
+  map<string, string> metadata = 3;
+  // Payload schema version (Phase 10). Defaults to 1 when 0.
+  uint32 version = 4;
+  // Per-entity monotonic sequence (Phase 11/12). Load-bearing for gating and
+  // ordering — see producer-contract.md §1.
+  uint64 sequence = 5;
+  // Opaque, producer-defined position — a Kafka offset map, an outbox id, an
+  // event-store revision. Conduit never interprets it, only echoes the highest
+  // durably-projected one back in an `Ack`.
+  string position = 6;
+  // Optional. Recorded on the guard row and in the execution report / DLQ
+  // filename. When empty Conduit derives one from `position` (or
+  // `event_type + sequence`) — it is not load-bearing for gating.
+  string event_id = 7;
+}
+
+message Ack {
+  // The highest `position` whose batch's guards are now committed. The producer
+  // resumes from here after a disconnect; anything it re-sends is absorbed by
+  // the idempotent sinks.
+  string position = 1;
+  // Events dispatched in the batch this ack covers (created + updated + deleted
+  // + skipped + dlq). Observability only.
+  uint32 batch_events = 2;
+}

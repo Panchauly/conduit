@@ -72,6 +72,30 @@ enum Commands {
         output: OutputFormat,
     },
 
+    /// Run the gRPC ingestion service — producers stream events, get position acks.
+    Ingest {
+        #[arg(long)]
+        config: PathBuf,
+
+        #[arg(long)]
+        mappings: PathBuf,
+
+        /// Listen address: `tcp://0.0.0.0:50051` or a bare `host:port`.
+        #[arg(long, default_value = "tcp://127.0.0.1:50051")]
+        listen: String,
+
+        /// Max events per batch.
+        #[arg(long)]
+        max_batch: Option<usize>,
+
+        /// Directory to park poison events.
+        #[arg(long)]
+        dlq: Option<PathBuf>,
+
+        #[arg(long, value_enum, default_value_t)]
+        output: OutputFormat,
+    },
+
     Explain {
         #[arg(long)]
         config: PathBuf,
@@ -156,6 +180,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Sources { config, output } => sources_cmd(config, output)?,
 
+        Commands::Ingest {
+            config,
+            mappings,
+            listen,
+            max_batch,
+            dlq,
+            output,
+        } => ingest_cmd(config, mappings, listen, max_batch, dlq, output)?,
+
         Commands::Explain {
             config,
             event,
@@ -235,6 +268,41 @@ fn run_cmd(
     }
 
     let report = pipeline::run_source_loop(&config, &mappings, &opts, &stop)?;
+    render_source_run_report(&report, output)?;
+    Ok(match report.stopped_reason {
+        StoppedReason::RetryExhausted => 1,
+        _ if report.events_failed > report.events_dlq => 1,
+        _ => 0,
+    })
+}
+
+// --------------------------------------------------
+// Ingest — the gRPC ingestion service (Phase 20)
+// --------------------------------------------------
+
+fn ingest_cmd(
+    config: PathBuf,
+    mappings: PathBuf,
+    listen: String,
+    max_batch: Option<usize>,
+    dlq: Option<PathBuf>,
+    output: OutputFormat,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let stop = Arc::clone(&stop);
+        let _ = ctrlc::set_handler(move || stop.store(true, Ordering::Relaxed));
+    }
+
+    let opts = conduit_ingest::ServeOptions {
+        listen,
+        max_batch: max_batch.unwrap_or(256),
+        retry_budget: 3,
+        dlq_dir: dlq,
+        ..Default::default()
+    };
+
+    let report = conduit_ingest::serve(&config, &mappings, &opts, &stop)?;
     render_source_run_report(&report, output)?;
     Ok(match report.stopped_reason {
         StoppedReason::RetryExhausted => 1,
