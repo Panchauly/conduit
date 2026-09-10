@@ -8,8 +8,8 @@ use crate::upcast::UpcasterRegistry;
 
 /// SQL projection plus the version metadata used to produce it (Phase 10.3).
 pub struct SqlProjection {
-    pub sql: String,
-    pub values: Vec<serde_json::Value>,
+    /// Dialect-neutral write description (Phase 19.1); the backend renders it.
+    pub write: super::exec::SqlWrite,
     pub source_version: u32,
     pub projected_version: u32,
     /// Resolved entity identity (Phase 11.1/11.2), canonicalized as an
@@ -73,10 +73,9 @@ impl SqlRuntimeBuilder {
         let projected_version = mapping.version;
 
         if source_version == projected_version {
-            let (sql, values, key_values) = mapping.build(event)?;
+            let (write, key_values) = mapping.build(event)?;
             return Ok(SqlProjection {
-                sql,
-                values,
+                write,
                 source_version,
                 projected_version,
                 entity_key: encode_entity_key(&key_values)?,
@@ -115,10 +114,9 @@ impl SqlRuntimeBuilder {
             ..event.clone()
         };
 
-        let (sql, values, key_values) = mapping.build(&upcasted_event)?;
+        let (write, key_values) = mapping.build(&upcasted_event)?;
         Ok(SqlProjection {
-            sql,
-            values,
+            write,
             source_version,
             projected_version,
             entity_key: encode_entity_key(&key_values)?,

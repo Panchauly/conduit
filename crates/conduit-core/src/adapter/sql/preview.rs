@@ -17,7 +17,7 @@ impl<'a> SqlPreviewBuilder<'a> {
     pub fn preview(
         &self,
         event: &Event,
-    ) -> Result<(String, Vec<serde_json::Value>, Vec<serde_json::Value>), SqlError> {
+    ) -> Result<(super::exec::SqlWrite, Vec<serde_json::Value>), SqlError> {
         let mapping = self
             .mappings
             .get(&event.event_type)

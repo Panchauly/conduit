@@ -103,13 +103,16 @@ impl SqlMapping {
         self.facet.as_deref().unwrap_or("")
     }
 
-    /// Build the INSERT statement and its bound values, plus the resolved
-    /// entity identity (Phase 11.1) — the `primary_key` column(s)' value(s),
-    /// in declared `primary_key` order, read off the same resolution pass
-    /// that builds `columns` so they can never drift from what is actually
-    /// inserted. Each key value must be a JSON scalar (string/number/bool);
-    /// an object/array/null fails the build rather than reach the guard key.
-    pub fn build(&self, event: &Event) -> Result<(String, Vec<Value>, Vec<Value>), SqlError> {
+    /// Build the dialect-neutral [`SqlWrite`](super::exec::SqlWrite) and the
+    /// resolved entity identity (Phase 11.1) — the `primary_key` column(s)'
+    /// value(s), in declared `primary_key` order, read off the same resolution
+    /// pass that builds `columns` so they can never drift from what is actually
+    /// inserted. Each key value must be a JSON scalar (string/number/bool); an
+    /// object/array/null fails the build rather than reach the guard key.
+    ///
+    /// The backend renders the `SqlWrite` — Phase 19.1 moved the SQL-string
+    /// generation out of the mapping.
+    pub fn build(&self, event: &Event) -> Result<(super::exec::SqlWrite, Vec<Value>), SqlError> {
         // Parse payload JSON
         let payload: Value = serde_json::from_str(&event.payload)
             .map_err(|e| SqlError::BuildFailed(format!("invalid payload JSON: {}", e)))?;
@@ -159,72 +162,48 @@ impl SqlMapping {
             key_values.push(value);
         }
 
-        let placeholders = vec!["?"; columns.len()].join(", ");
-
         // Phase 15.3: a named-facet mapping is always a partial upsert — every
         // column is still inserted (the row may not exist on a resurrection
         // edge), but only the facet's own **non-key** columns appear in the
         // `SET` list, so a facet update never clobbers another facet's columns
         // or the create mapping's columns. The entity-existence pre-check in
         // the adapter guarantees the `DO UPDATE` branch is the one that runs.
-        if self.facet.is_some() {
-            let conflict_columns = self.primary_key.iter().cloned().collect::<Vec<_>>();
-            let pk: std::collections::HashSet<&str> =
-                self.primary_key.iter().map(|s| s.as_str()).collect();
-            let set_clause = columns
-                .iter()
-                .filter(|c| !pk.contains(c.as_str()))
-                .map(|c| format!("{c} = excluded.{c}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}",
-                self.table,
-                columns.join(", "),
-                placeholders,
-                conflict_columns.join(", "),
-                set_clause
-            );
-            return Ok((sql, values, key_values));
-        }
+        //
+        // Phase 12.3: for `on_existing: replace` every mapped column is in the
+        // SET list (full replace). `on_existing: ignore` emits a plain INSERT —
+        // no `ON CONFLICT` clause (empty `conflict_target`). An `ON CONFLICT`
+        // target requires the target table to declare a matching PRIMARY KEY /
+        // UNIQUE constraint (SQLite and Postgres both) — schema ownership
+        // outside Conduit.
+        let pk_names: Vec<String> = self.primary_key.iter().cloned().collect();
+        let pk_set: std::collections::HashSet<&str> =
+            self.primary_key.iter().map(|s| s.as_str()).collect();
 
-        let sql = match self.on_existing {
-            OnExisting::Ignore => format!(
-                "INSERT INTO {} ({}) VALUES ({})",
-                self.table,
-                columns.join(", "),
-                placeholders
-            ),
-            // Phase 12.3: the same statement doubles as a plain insert when no
-            // conflict exists (harmless — the ON CONFLICT clause just never
-            // fires), so `Insert` and `Update` decisions share one statement.
-            // Every mapped column is in the SET list — full replace, no
-            // partial-column updates (see Phase 12 non-goals).
-            //
-            // Requires the target table to declare an actual PRIMARY KEY or
-            // UNIQUE constraint on exactly these columns — SQLite (like
-            // Postgres) rejects an ON CONFLICT target with no matching
-            // constraint. That's schema ownership outside Conduit; a mapping
-            // author adding `on_existing: replace` must add the constraint too.
-            OnExisting::Replace => {
-                let conflict_columns = self.primary_key.iter().cloned().collect::<Vec<_>>();
-                let set_clause = columns
+        let (conflict_target, set_columns) = if self.facet.is_some() {
+            (
+                pk_names.clone(),
+                columns
                     .iter()
-                    .map(|c| format!("{c} = excluded.{c}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!(
-                    "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}",
-                    self.table,
-                    columns.join(", "),
-                    placeholders,
-                    conflict_columns.join(", "),
-                    set_clause
-                )
+                    .filter(|c| !pk_set.contains(c.as_str()))
+                    .cloned()
+                    .collect(),
+            )
+        } else {
+            match self.on_existing {
+                OnExisting::Ignore => (Vec::new(), Vec::new()),
+                OnExisting::Replace => (pk_names.clone(), columns.clone()),
             }
         };
 
-        Ok((sql, values, key_values))
+        let write = super::exec::SqlWrite {
+            table: self.table.clone(),
+            columns,
+            values,
+            conflict_target,
+            set_columns,
+        };
+
+        Ok((write, key_values))
     }
 
     fn resolve_path(
@@ -300,7 +279,7 @@ columns:
             version: 1,
             sequence: 1,
         };
-        let (_, _, key_values) = m.build(&event).unwrap();
+        let (_, key_values) = m.build(&event).unwrap();
         assert_eq!(
             key_values,
             vec![Value::String("a@b.com".into()), Value::String("u1".into())]
@@ -333,7 +312,9 @@ columns:
             version: 1,
             sequence: 1,
         };
-        let (sql, _, _) = m.build(&event).unwrap();
+        let (write, _) = m.build(&event).unwrap();
+        assert!(write.conflict_target.is_empty());
+        let sql = write.render(super::super::exec::Placeholders::Question);
         assert!(!sql.contains("ON CONFLICT"), "{sql}");
         assert!(sql.starts_with("INSERT INTO users"), "{sql}");
     }
@@ -350,7 +331,9 @@ columns:
             version: 1,
             sequence: 1,
         };
-        let (sql, _, _) = m.build(&event).unwrap();
+        let (write, _) = m.build(&event).unwrap();
+        assert_eq!(write.conflict_target, vec!["id", "email"]);
+        let sql = write.render(super::super::exec::Placeholders::Question);
         assert!(sql.contains("ON CONFLICT (id, email)"), "{sql}");
         assert!(sql.contains("DO UPDATE SET"), "{sql}");
         assert!(sql.contains("email = excluded.email"), "{sql}");
