@@ -6,6 +6,7 @@ pub mod pipeline;
 pub mod replay;
 pub mod routing;
 pub mod runtime;
+pub mod source;
 pub mod upcast;
 
 use std::collections::HashMap;
@@ -42,6 +43,13 @@ pub use replay::{
     EventsFromPath, PerEventReplaySummary, ReplayContext, ReplayLoadError, ReplayReport,
     ReplayRunOptions, events_from_path, replay_stream, replay_stream_with_options,
 };
+
+/// Phase 17 event-source API.
+pub use source::runner::{
+    RunMode, SourceRunOptions, SourceRunReport, StoppedReason, run_sources,
+    run_sources_with_adapters,
+};
+pub use source::{EventSource, SourceError, SourcePosition, SourcedEvent};
 
 /// Phase 8 projection validation.
 pub use runtime::{

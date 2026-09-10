@@ -67,6 +67,7 @@ fn execute_event_runs_without_panic() {
         ],
         failure_policy: FailurePolicy::FailFast,
         migration_policy: Default::default(),
+        sources: Vec::new(),
     };
 
     config.validate().expect("config must be valid");

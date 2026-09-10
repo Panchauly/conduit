@@ -102,6 +102,7 @@ fn replay_reorders_facet_after_create_by_sequence() {
         })],
         failure_policy: FailurePolicy::FailFast,
         migration_policy: Default::default(),
+        sources: Vec::new(),
     };
     config.validate().unwrap();
 

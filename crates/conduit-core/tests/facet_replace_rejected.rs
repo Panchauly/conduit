@@ -29,6 +29,7 @@ fn config() -> ConduitConfig {
         })],
         failure_policy: Default::default(),
         migration_policy: Default::default(),
+        sources: Vec::new(),
     }
 }
 

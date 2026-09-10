@@ -129,6 +129,7 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
         })],
         failure_policy: Default::default(),
         migration_policy: Default::default(),
+        sources: Vec::new(),
     };
     replay_config.validate().unwrap();
 
@@ -175,6 +176,7 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
         })],
         failure_policy: Default::default(),
         migration_policy: Default::default(),
+        sources: Vec::new(),
     };
     live_config.validate().unwrap();
 

@@ -7,8 +7,12 @@ use conduit_core::pipeline;
 use conduit_core::replay::{ReplayReport, ReplayRunOptions};
 use conduit_core::routing::StorageKind;
 use conduit_core::runtime::PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING;
+use conduit_core::source::runner::{RunMode, SourceRunOptions, SourceRunReport, StoppedReason};
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "conduit")]
@@ -27,6 +31,7 @@ enum OutputFormat {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run a single event (`--event`) or the continuous source loop (config `sources:`).
     Run {
         #[arg(long)]
         config: PathBuf,
@@ -34,8 +39,34 @@ enum Commands {
         #[arg(long)]
         mappings: PathBuf,
 
+        /// One-shot: project this single event file and exit (no source loop).
         #[arg(long)]
-        event: PathBuf,
+        event: Option<PathBuf>,
+
+        /// Drain every configured source once, commit, and exit (subsumes `replay`).
+        #[arg(long, default_value_t = false)]
+        once: bool,
+
+        /// Max events per source per poll (source loop only).
+        #[arg(long)]
+        max_batch: Option<usize>,
+
+        /// Poll interval in ms when all sources are caught up (continuous mode).
+        #[arg(long)]
+        poll_interval_ms: Option<u64>,
+
+        /// Directory to park poison events; without it a persistently-failing batch halts the loop.
+        #[arg(long)]
+        dlq: Option<PathBuf>,
+
+        #[arg(long, value_enum, default_value_t)]
+        output: OutputFormat,
+    },
+
+    /// List configured event sources and their committed positions.
+    Sources {
+        #[arg(long)]
+        config: PathBuf,
 
         #[arg(long, value_enum, default_value_t)]
         output: OutputFormat,
@@ -107,8 +138,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             config,
             mappings,
             event,
+            once,
+            max_batch,
+            poll_interval_ms,
+            dlq,
             output,
-        } => run_cmd(config, mappings, event, output)?,
+        } => run_cmd(
+            config,
+            mappings,
+            event,
+            once,
+            max_batch,
+            poll_interval_ms,
+            dlq,
+            output,
+        )?,
+
+        Commands::Sources { config, output } => sources_cmd(config, output)?,
 
         Commands::Explain {
             config,
@@ -147,18 +193,131 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // --------------------------------------------------
-// Run (normal execution)
+// Run — one-shot event, or the Phase 17 source loop
 // --------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn run_cmd(
     config: PathBuf,
     mappings: PathBuf,
-    event: PathBuf,
+    event: Option<PathBuf>,
+    once: bool,
+    max_batch: Option<usize>,
+    poll_interval_ms: Option<u64>,
+    dlq: Option<PathBuf>,
     output: OutputFormat,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    let report = pipeline::run(&config, &mappings, &event)?;
-    render_report(&report, output)?;
-    Ok(exit_code_from_status(report.status))
+    // Back-compat: `run --event <file>` stays a one-shot single-event run.
+    if let Some(event) = event {
+        let report = pipeline::run(&config, &mappings, &event)?;
+        render_report(&report, output)?;
+        return Ok(exit_code_from_status(report.status));
+    }
+
+    let opts = SourceRunOptions {
+        mode: if once {
+            RunMode::Once
+        } else {
+            RunMode::Continuous {
+                poll_interval: Duration::from_millis(poll_interval_ms.unwrap_or(1000)),
+            }
+        },
+        max_batch: max_batch.unwrap_or(256),
+        retry_budget: 3,
+        dlq_dir: dlq,
+    };
+
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let stop = Arc::clone(&stop);
+        // Graceful shutdown: stop polling, finish the in-flight batch, commit, exit.
+        let _ = ctrlc::set_handler(move || stop.store(true, Ordering::Relaxed));
+    }
+
+    let report = pipeline::run_source_loop(&config, &mappings, &opts, &stop)?;
+    render_source_run_report(&report, output)?;
+    Ok(match report.stopped_reason {
+        StoppedReason::RetryExhausted => 1,
+        _ if report.events_failed > report.events_dlq => 1,
+        _ => 0,
+    })
+}
+
+// --------------------------------------------------
+// Sources (Phase 17.4)
+// --------------------------------------------------
+
+fn sources_cmd(config: PathBuf, output: OutputFormat) -> Result<i32, Box<dyn std::error::Error>> {
+    let sources = pipeline::list_sources(&config)?;
+    match output {
+        OutputFormat::Text => {
+            println!("--- Sources ---");
+            if sources.is_empty() {
+                println!("(none configured)");
+            }
+            for (id, pos) in &sources {
+                println!("{}  committed: {}", id, pos.as_deref().unwrap_or("(never)"));
+            }
+            println!("---------------");
+        }
+        OutputFormat::Json => {
+            let json: Vec<_> = sources
+                .iter()
+                .map(|(id, pos)| serde_json::json!({ "id": id, "committed_position": pos }))
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&json)?);
+        }
+    }
+    Ok(0)
+}
+
+fn render_source_run_report(
+    report: &SourceRunReport,
+    output: OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match output {
+        OutputFormat::Text => {
+            println!("--- Source Run ---");
+            for b in &report.batches {
+                println!(
+                    "[{}] {}..{} — {} events (created {}, updated {}, deleted {}, skipped {}, failed {}, dlq {}, retries {}) — {}",
+                    b.source_id,
+                    b.position_from.as_deref().unwrap_or("(start)"),
+                    b.position_to,
+                    b.events,
+                    b.created,
+                    b.updated,
+                    b.deleted,
+                    b.skipped,
+                    b.failed,
+                    b.dlq,
+                    b.retries,
+                    if b.committed {
+                        "committed"
+                    } else {
+                        "NOT committed"
+                    }
+                );
+            }
+            println!(
+                "Processed: {}  Succeeded: {}  Failed: {}  DLQ: {}  Batches committed: {}",
+                report.events_processed,
+                report.events_succeeded,
+                report.events_failed,
+                report.events_dlq,
+                report.batches_committed
+            );
+            println!("Stopped: {:?}", report.stopped_reason);
+            if let Some(ref p) = report.halt_position {
+                println!("Halt position: {}", p);
+            }
+            println!("------------------");
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(report)?);
+        }
+    }
+    Ok(())
 }
 
 // --------------------------------------------------

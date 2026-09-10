@@ -83,6 +83,12 @@ pub struct ConduitConfig {
     /// How version-mismatched events are handled: strict (default) or ignore_unmatched.
     #[serde(default)]
     pub migration_policy: MigrationPolicy,
+
+    /// Phase 17: configured event sources. Empty (the default) → `conduit run`
+    /// still works with an explicit `--event <file>`; the continuous source
+    /// loop requires at least one.
+    #[serde(default)]
+    pub sources: Vec<SourceConfig>,
 }
 
 impl ConduitConfig {
@@ -116,6 +122,15 @@ impl ConduitConfig {
                         dependency: dep.clone(),
                     });
                 }
+            }
+        }
+
+        // Phase 17: source ids are unique (and distinct from nothing else —
+        // routing is by event_type, source_id is observability only).
+        let mut source_ids = HashSet::new();
+        for source in &self.sources {
+            if !source_ids.insert(source.id().to_string()) {
+                return Err(ConfigError::DuplicateSourceId(source.id().to_string()));
             }
         }
 
@@ -233,6 +248,44 @@ pub struct GraphConfig {
 }
 
 // ------------------------------------------------------------
+// Source Configs (Phase 17)
+// ------------------------------------------------------------
+
+/// A configured event source — the input-side mirror of [`AdapterConfig`].
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SourceConfig {
+    /// Watches a directory for event files (`*.json` / `*.ndjson` / `*.jsonl`).
+    Directory(DirectorySourceConfig),
+    /// NDJSON on standard input, one event per line.
+    Stdin(StdinSourceConfig),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DirectorySourceConfig {
+    pub id: String,
+    /// Directory of event files, relative to the config file's directory.
+    pub path: String,
+    /// Where the checkpoint sidecar lives, relative to the config file's directory.
+    pub state_dir: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StdinSourceConfig {
+    pub id: String,
+    pub state_dir: String,
+}
+
+impl SourceConfig {
+    pub fn id(&self) -> &str {
+        match self {
+            SourceConfig::Directory(c) => &c.id,
+            SourceConfig::Stdin(c) => &c.id,
+        }
+    }
+}
+
+// ------------------------------------------------------------
 // Errors
 // ------------------------------------------------------------
 
@@ -241,6 +294,7 @@ pub enum ConfigError {
     UnsupportedVersion(u32),
     NoAdaptersDefined,
     DuplicateAdapterId(String),
+    DuplicateSourceId(String),
     SelfDependency(String),
     UnknownDependency { adapter: String, dependency: String },
 }
@@ -256,6 +310,9 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::DuplicateAdapterId(id) => {
                 write!(f, "duplicate adapter id: {}", id)
+            }
+            ConfigError::DuplicateSourceId(id) => {
+                write!(f, "duplicate source id: {}", id)
             }
             ConfigError::SelfDependency(id) => {
                 write!(f, "adapter {:?} cannot depend on itself", id)
@@ -316,5 +373,72 @@ impl AdapterConfig {
             AdapterConfig::KeyValue(cfg) => &cfg.depends_on,
             AdapterConfig::Graph(cfg) => &cfg.depends_on,
         }
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+
+    #[test]
+    fn parses_directory_and_stdin_sources() {
+        let yaml = r#"
+version: 1
+routing:
+  file: routing.json
+adapters:
+  - type: sqlite
+    id: sql-primary
+    priority: 10
+    config: { path: ":memory:" }
+sources:
+  - type: directory
+    id: inbox
+    path: ./events
+    state_dir: ./.conduit/sources
+  - type: stdin
+    id: pipe
+    state_dir: ./.conduit/sources
+"#;
+        let cfg: ConduitConfig = serde_yaml::from_str(yaml).unwrap();
+        cfg.validate().unwrap();
+        assert_eq!(cfg.sources.len(), 2);
+        assert_eq!(cfg.sources[0].id(), "inbox");
+        assert_eq!(cfg.sources[1].id(), "pipe");
+    }
+
+    #[test]
+    fn rejects_duplicate_source_id() {
+        let yaml = r#"
+version: 1
+routing: { file: routing.json }
+adapters:
+  - type: sqlite
+    id: s
+    priority: 1
+    config: { path: ":memory:" }
+sources:
+  - { type: stdin, id: dup, state_dir: /tmp }
+  - { type: stdin, id: dup, state_dir: /tmp }
+"#;
+        let cfg: ConduitConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = cfg.validate().unwrap_err();
+        assert!(err.to_string().contains("duplicate source id"), "{err}");
+    }
+
+    #[test]
+    fn config_without_sources_is_valid() {
+        let yaml = r#"
+version: 1
+routing: { file: routing.json }
+adapters:
+  - type: sqlite
+    id: s
+    priority: 1
+    config: { path: ":memory:" }
+"#;
+        let cfg: ConduitConfig = serde_yaml::from_str(yaml).unwrap();
+        cfg.validate().unwrap();
+        assert!(cfg.sources.is_empty());
     }
 }

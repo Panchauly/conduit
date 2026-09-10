@@ -204,6 +204,7 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
         })],
         failure_policy: Default::default(),
         migration_policy: Default::default(),
+        sources: Vec::new(),
     };
     replay_config.validate().unwrap();
 
@@ -252,6 +253,7 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
         })],
         failure_policy: Default::default(),
         migration_policy: Default::default(),
+        sources: Vec::new(),
     };
     live_config.validate().unwrap();
 
