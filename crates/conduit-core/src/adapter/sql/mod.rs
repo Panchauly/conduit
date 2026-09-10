@@ -4,4 +4,3 @@ pub mod mapping;
 pub mod preview;
 pub mod runtime;
 pub mod sqlite;
-pub mod validate;

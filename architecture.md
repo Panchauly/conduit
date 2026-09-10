@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-**Conduit** is an **event-first projection engine** that deterministically applies events to one or more storage models (SQL, document, etc.) using **explicit mappings** and **strict runtime semantics**.
+**Conduit** is an **event-first projection engine** that deterministically applies events to one or more storage models (SQL, document, key-value, graph) using **explicit mappings** and **strict runtime semantics**.
 
 Conduit is designed to be:
 
@@ -12,6 +12,20 @@ Conduit is designed to be:
 * side-effect aware
 
 It is intentionally **not** a streaming platform, workflow engine, or database.
+
+---
+
+## 1.1 Scope boundary
+
+Conduit's job is **projection only**. It takes an event payload, resolves where it goes, verifies it is safe to write, orders execution deterministically, and projects it into the target storage models without corrupting state. It does **not** produce, ingest, buffer, or store events — producing the event log is out of scope. (An event-store substrate that would own the log was considered and rejected; Conduit consumes a log it does not own.)
+
+| Owner | Responsibilities |
+|-------|------------------|
+| **Application / command side** | business logic, command validation, state transitions, and emitting events — whether by synchronously invoking Conduit as a library or by pushing to a socket / broker |
+| **Transport / external world** | durability, wire protocols, network transport, and consumer offsets — everything behind the `EventSource` trait |
+| **Conduit** | resolve where an event goes (routing), verify it is safe to write (validation), order execution deterministically (dependency graph), project it into target storage models without corrupting state (`decide()` + per-lane guards) |
+
+Everything Conduit relies on from the application and transport — a monotonic per-entity `sequence`, a stable canonical entity id, per-entity delivery order — it assumes and cannot verify. Those assumptions are catalogued in [`phases/producer-contract.md`](phases/producer-contract.md).
 
 ---
 
@@ -37,6 +51,8 @@ All projections are declared explicitly:
 
 * SQL mappings define tables, columns, and keys
 * Document mappings define collection-level structure
+* Key-value mappings define a namespace, key path, and value template
+* Graph mappings define a node (`label` + `key`) or an edge (`edge_type` + `from`/`to`)
 
 There is:
 
@@ -88,17 +104,17 @@ The factory is a **composition boundary only**; it introduces no new behavior an
 
 ---
 
-## 3. High-Level Components
-
 ### 3.1 CLI Layer
 
 The CLI is a **control surface**, not a runtime container.
 
 Commands:
 
-* `validate` — configuration validation only
-* `test-event` — deterministic preview, no writes
-* `run` — real execution with side effects
+* `run` — real execution: one-shot with `--event <file>`, or the continuous source loop (`--once` to drain and exit) when the config declares `sources:` (Phase 17)
+* `sources` — list configured sources and their committed positions
+* `explain` — routing + dependency order for one event, no execution
+* `dry-run` — full simulated execution, no writes
+* `replay` — drain a directory / NDJSON file once (superseded by `run --once`; kept for compatibility)
 
 The CLI performs:
 
@@ -106,7 +122,7 @@ The CLI performs:
 * config loading
 * error classification
 
-It does **not** perform business logic.
+It does **not** perform business logic (thin-CLI pattern — all engine logic lives in `conduit-core`).
 
 ---
 
@@ -118,8 +134,10 @@ Routing is:
 * deterministic
 * event-type driven
 
+Events route by `event_type` through a config-backed routing table to a list of **adapter ids**, not storage kinds — one event type can target several adapters of the same kind (e.g. a master and a replica):
+
 ```rust
-fn route(event: &Event) -> Vec<StorageKind>
+fn route_with_rules(event: &Event, rules: &HashMap<String, Vec<AdapterId>>) -> Vec<AdapterId>
 ```
 
 Routing does **not**:
@@ -140,11 +158,12 @@ Dispatch is responsible for:
 
 Dispatch semantics:
 
-* adapters are isolated
-* failures do not stop execution
+* adapters run in dependency order (Kahn's algorithm over `depends_on`, then priority — Phase 9), not just priority
+* on failure, `FailurePolicy` decides: `fail_fast` (default) stops the batch; `continue_on_error` runs every routed adapter
+* downstream adapters of a failed dependency are skipped
 * results are always reported
 
-There is **no rollback** and **no coordination** between adapters.
+There is **no rollback** and **no cross-adapter transaction**.
 
 ---
 
@@ -169,6 +188,10 @@ Adapters are:
 * blocking
 * side-effecting
 
+Every adapter's write is gated by one shared pure function, `decide()` (`adapter/mod.rs`): given the `Operation` (`upsert` / `delete`), the mapping's `on_existing` mode, the persisted guard state for that entity's lane (`last_sequence`, `deleted`, `permanent`), and the event's `sequence`, it returns a `WriteDecision` (`Insert` / `Update` / `Delete` / one of the skip variants). The four adapters call it unchanged — sequence gating, redelivery, tombstones, and resurrection are decided once, not four times.
+
+The result is an `AdapterResult` carrying an `AdapterOutcome` — `Created` / `Updated` / `Deleted` / `Skipped(SkipReason)` / `Failed(AdapterError)` (Phase 12.1). A skip is not a failure; `SkipReason` (`AlreadyProjected`, `StaleSequence`, `AlreadyDeleted`, `Tombstoned`, `EntityAbsent`, `UnsupportedVersion`) is machine-readable and round-trips into the JSON execution report.
+
 ---
 
 ### 4.2 SQL Adapter
@@ -185,11 +208,11 @@ Non-responsibilities:
 * retries
 * cross-adapter transactions
 
-Idempotency (Phase 4):
+Idempotency:
 
-* enforced via a local guard table
-* stored in the same database
-* atomic with projection execution
+* enforced via the `conduit_projection_state` guard table, PK `(target_table, entity_key, facet)` (Phases 11 / 15)
+* stored in the same database, atomic with projection execution
+* `on_existing: replace` builds `INSERT … ON CONFLICT (<pk>) DO UPDATE SET …` (Phase 12); a named facet restricts the `SET` list to its own columns (Phase 15)
 
 ---
 
@@ -198,14 +221,25 @@ Idempotency (Phase 4):
 Responsibilities:
 
 * build document JSON via mappings
-* determine filesystem layout
-* write files deterministically
+* determine filesystem layout — output keyed by `(collection, entity_id)` (Phase 13.3), not `event_type`
+* write files deterministically via write-to-temp-then-rename
 
-Idempotency (Phase 4):
+Idempotency:
 
-* enforced via filesystem guard files
-* adapter-local state only
-* no shared coordination
+* enforced via a per-entity JSON guard sidecar (`last_sequence` / `deleted` / `permanent`, plus a `facets` map — Phases 11 / 13 / 15)
+* adapter-local state only; single-writer assumption
+
+---
+
+### 4.4 Key-Value Adapter (File-Based) — Phase 14
+
+A flat namespace → key → value store: `{root}/{namespace}/{key}.json` plus a guard sidecar. The simplest adapter — no query language, no schema — added as a generalization test for the abstraction. Same `decide()`, same guard shape, `facets` on the value.
+
+---
+
+### 4.5 Graph Adapter (File-Based) — Phase 16
+
+A directed property graph. Nodes and edges are *separately keyed records*, each an independent `decide()` lane: a node keyed by `node_id`, an edge by the canonical `[edge_type, from, to(, discriminator)]`. `operation: delete` on a node is a `DETACH DELETE` — it removes the node and every incident edge (tracked in a per-node incident index) in one adapter operation. Nodes are entities (facets apply); edges are not.
 
 ---
 
@@ -231,26 +265,26 @@ They are intentionally opaque.
 
 ---
 
-## 6. Idempotency Model (Phase 4)
+## 6. Idempotency Model (Phases 11–17)
 
 ### 6.1 Definition
 
-Idempotency is **event-level**, not row-level.
+Idempotency is **entity-keyed and sequence-gated**, not `event_id`-keyed (Phase 11 superseded the Phase 4 `conduit_events` / event-id model).
 
-Processing the same `event_id` multiple times:
+A guard lane is `(target, entity_key, facet)`. Its state is `{ last_sequence, deleted, permanent }`. For each event, `decide()` compares the event's `sequence` to `last_sequence`:
 
-* must not duplicate side effects
-* must return success
+* a **redelivery or superseded** event (`sequence <= last_sequence`) is `Skipped(StaleSequence)` — no write
+* a **newer** `upsert` under `on_existing: replace` overwrites; under `ignore` an already-projected entity is `Skipped(AlreadyProjected)`
+* a **newer** `delete` writes a tombstone (`deleted = true`); `permanent` tombstones reject every later event forever (Phase 13)
+* a newer `upsert` on a non-permanent tombstone **resurrects** the entity (Phase 13.4)
 
 ---
 
 ### 6.2 Scope
 
-* idempotency is adapter-local
-* no global coordination
-* no exactly-once guarantees
-
-Each adapter enforces idempotency using **storage-native mechanisms**.
+* idempotency is adapter-local — no global coordination, no exactly-once *delivery*
+* combined with an at-least-once source and a committed checkpoint, it yields **effectively-once projection** (Phase 17): the state after any sequence of crashes / restarts / redeliveries equals a single clean pass
+* each adapter enforces the guard using storage-native mechanisms (a SQL table row, a JSON sidecar)
 
 ---
 
@@ -258,10 +292,10 @@ Each adapter enforces idempotency using **storage-native mechanisms**.
 
 If an adapter:
 
-* fails before recording the guard → retry is possible
-* records the guard → replay becomes a no-op
+* fails before recording the guard → retry is possible (the source re-polls the uncommitted batch)
+* records the guard → replay of that event becomes a `Skipped(*)` no-op
 
-There is no attempt to reconcile partial success across adapters.
+There is no attempt to reconcile partial success across adapters within one event; the source-loop retry / DLQ / halt decision is across *batches* (Phase 17.5).
 
 ---
 
@@ -275,21 +309,25 @@ Each adapter returns:
 struct AdapterResult {
     adapter_id: String,
     kind: StorageKind,
-    success: bool,
-    error: Option<AdapterError>,
+    outcome: AdapterOutcome, // Created | Updated | Deleted | Skipped(SkipReason) | Failed(AdapterError)
+    source_version: Option<u32>,
+    projected_version: Option<u32>,
 }
 ```
+
+(Phase 12.1 replaced the `success: bool` + skip-message encoding with the `AdapterOutcome` enum.)
 
 Errors are **observable and explicit**.
 
 ---
 
-### 7.2 Error Types
+### 7.2 Outcome & Error Types
 
-* `WriteFailed` — side effect failed
-* `Skipped` — idempotent replay
+* `Created` / `Updated` / `Deleted` — a write happened
+* `Skipped(SkipReason)` — no write; `SkipReason` says why (stale, already projected, tombstoned, entity absent, unsupported version)
+* `Failed(AdapterError)` — `WriteFailed` or `UnsupportedVersion`
 
-Errors are never swallowed.
+Errors are never swallowed. Skips are not errors.
 
 ---
 
@@ -297,15 +335,16 @@ Errors are never swallowed.
 
 Conduit explicitly does **not** provide:
 
-* distributed transactions
-* exactly-once delivery
-* retries or backoff
+* distributed transactions or cross-adapter rollback
+* exactly-once *delivery* (it provides effectively-once *projection* via idempotent sinks)
 * async execution
-* service / daemon mode
-* schema inference
+* an event store / broker — it consumes a log it does not own (§1.1)
+* schema inference or auto-migration
+* backpressure, rate limiting, or flow control
+* distributed / multi-instance coordination — one projector owns its sources' positions
 * implicit behavior
 
-These are architectural constraints, not missing features.
+The Phase 17 `run` loop does across-*batch* retry (with a bounded budget) and a DLQ for poison events — this is the one deliberate step past "no retries", scoped to the source-consumption boundary. These are architectural constraints, not missing features.
 
 ---
 
@@ -327,8 +366,8 @@ If the answer is no, the feature does not belong in Conduit.
 
 ## 10. Status
 
-* Phase 1–4 complete
-* Core architecture locked
-* Future phases must preserve existing semantics
+* Phases 1–18 complete (see [`phases.md`](phases.md))
+* Four storage adapters (SQL, Document, Key-Value, Graph) + two event sources (directory, stdin), all file-backed
+* Core architecture locked; future phases must preserve existing semantics and the `decide()` contract
 
 This document defines the **architectural contract** of Conduit.
