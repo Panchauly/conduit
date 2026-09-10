@@ -36,6 +36,11 @@ pub struct SqlProjection {
     pub operation: Operation,
     /// `operation: delete` only (Phase 13.4): mark the tombstone permanent.
     pub permanent: bool,
+    /// Phase 15.1: the facet this mapping owns, normalized (`""` = default
+    /// facet / whole entity). The adapter keys the guard row by
+    /// `(table, entity_key, facet)` and, for a named facet, runs the
+    /// entity-existence pre-check and a partial-column update.
+    pub facet: String,
 }
 
 /// Owned SQL builder used inside adapters
@@ -81,6 +86,7 @@ impl SqlRuntimeBuilder {
                 on_existing: mapping.on_existing,
                 operation: mapping.operation,
                 permanent: mapping.permanent,
+                facet: mapping.facet_key().to_string(),
             });
         }
 
@@ -122,6 +128,7 @@ impl SqlRuntimeBuilder {
             on_existing: mapping.on_existing,
             operation: mapping.operation,
             permanent: mapping.permanent,
+            facet: mapping.facet_key().to_string(),
         })
     }
 }

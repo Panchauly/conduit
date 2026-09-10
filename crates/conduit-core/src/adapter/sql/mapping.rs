@@ -81,12 +81,28 @@ pub struct SqlMapping {
     #[serde(default)]
     pub permanent: bool,
 
+    /// Phase 15.1: the named facet this mapping owns. `None` → the **default
+    /// facet** (the whole entity — every pre-Phase-15 mapping). `Some("contact")`
+    /// → this mapping writes only its own non-key columns and gates on its own
+    /// per-facet sequence lane, leaving the rest of the row untouched. A named
+    /// facet is always a sequence-gated partial replace: the adapter passes
+    /// `OnExisting::Replace` to `decide()` for the facet's lane regardless of
+    /// this mapping's `on_existing` (which stays `ignore`). `operation: delete`
+    /// is only valid on the default facet.
+    #[serde(default)]
+    pub facet: Option<String>,
+
     /// Capabilities adapters must provide to run this projection (enum; parse-time validated).
     #[serde(default)]
     pub requires_capabilities: Vec<AdapterCapability>,
 }
 
 impl SqlMapping {
+    /// Normalized facet key — `""` for the default facet (Phase 15.1).
+    pub fn facet_key(&self) -> &str {
+        self.facet.as_deref().unwrap_or("")
+    }
+
     /// Build the INSERT statement and its bound values, plus the resolved
     /// entity identity (Phase 11.1) — the `primary_key` column(s)' value(s),
     /// in declared `primary_key` order, read off the same resolution pass
@@ -144,6 +160,33 @@ impl SqlMapping {
         }
 
         let placeholders = vec!["?"; columns.len()].join(", ");
+
+        // Phase 15.3: a named-facet mapping is always a partial upsert — every
+        // column is still inserted (the row may not exist on a resurrection
+        // edge), but only the facet's own **non-key** columns appear in the
+        // `SET` list, so a facet update never clobbers another facet's columns
+        // or the create mapping's columns. The entity-existence pre-check in
+        // the adapter guarantees the `DO UPDATE` branch is the one that runs.
+        if self.facet.is_some() {
+            let conflict_columns = self.primary_key.iter().cloned().collect::<Vec<_>>();
+            let pk: std::collections::HashSet<&str> =
+                self.primary_key.iter().map(|s| s.as_str()).collect();
+            let set_clause = columns
+                .iter()
+                .filter(|c| !pk.contains(c.as_str()))
+                .map(|c| format!("{c} = excluded.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}",
+                self.table,
+                columns.join(", "),
+                placeholders,
+                conflict_columns.join(", "),
+                set_clause
+            );
+            return Ok((sql, values, key_values));
+        }
 
         let sql = match self.on_existing {
             OnExisting::Ignore => format!(

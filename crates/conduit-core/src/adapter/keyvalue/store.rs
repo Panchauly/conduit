@@ -16,10 +16,27 @@ use crate::{
 };
 
 /// Idempotency guard sidecar — structurally identical to the document
-/// adapter's `ProjectionGuard` (Phase 11.3/12.4/13.3), just named for the
-/// third storage kind.
-#[derive(Debug, Serialize, Deserialize)]
+/// adapter's `ProjectionGuard` (Phase 11.3/12.4/13.3/15.2), just named for the
+/// third storage kind. The default facet stays in the flat fields (a
+/// pre-Phase-15 sidecar round-trips unchanged); named-facet lanes live in
+/// `facets`.
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct KvGuard {
+    #[serde(default)]
+    last_sequence: u64,
+    #[serde(default)]
+    last_event_id: String,
+    #[serde(default)]
+    deleted: bool,
+    #[serde(default)]
+    permanent: bool,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    facets: std::collections::BTreeMap<String, KvFacetGuard>,
+}
+
+/// One named-facet lane inside a [`KvGuard`] (Phase 15.2).
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct KvFacetGuard {
     last_sequence: u64,
     last_event_id: String,
     #[serde(default)]
@@ -28,12 +45,22 @@ struct KvGuard {
     permanent: bool,
 }
 
-impl From<&KvGuard> for GuardState {
-    fn from(g: &KvGuard) -> Self {
-        GuardState {
-            last_sequence: g.last_sequence,
-            deleted: g.deleted,
-            permanent: g.permanent,
+impl KvGuard {
+    /// The Phase 12/13 [`GuardState`] for one lane — flat fields for the
+    /// default facet (`""`), a `facets` entry for a named one.
+    fn lane_state(&self, facet: &str) -> Option<GuardState> {
+        if facet.is_empty() {
+            Some(GuardState {
+                last_sequence: self.last_sequence,
+                deleted: self.deleted,
+                permanent: self.permanent,
+            })
+        } else {
+            self.facets.get(facet).map(|f| GuardState {
+                last_sequence: f.last_sequence,
+                deleted: f.deleted,
+                permanent: f.permanent,
+            })
         }
     }
 }
@@ -175,23 +202,46 @@ impl StorageAdapter for KeyValueStore {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
+        let facet = projection.facet.clone();
+        let is_named_facet = !facet.is_empty();
         let guard_path = self.guard_path(&projection.namespace, &projection.entity_key);
 
         // Read-decide-write, all against this one sidecar file. Known
         // limitation (Phase 12.4 non-goal, inherited): not atomic across
         // processes — the store assumes a single writer.
-        let stored_guard = match self.read_guard(&guard_path) {
+        let mut stored_guard = match self.read_guard(&guard_path) {
             Ok(g) => g,
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
-        let stored: Option<GuardState> = stored_guard.as_ref().map(GuardState::from);
 
-        let decision = decide(
-            projection.operation,
-            projection.on_existing,
-            stored,
-            event.sequence,
-        );
+        // PHASE 15.3: entity-existence pre-check for a named facet.
+        if is_named_facet {
+            let entity_present = stored_guard
+                .as_ref()
+                .and_then(|g| g.lane_state(""))
+                .is_some_and(|s| !s.deleted);
+            if !entity_present {
+                return AdapterResult::skipped_versioned(
+                    self.id.clone(),
+                    StorageKind::KeyValue,
+                    SkipReason::EntityAbsent,
+                    projection.source_version,
+                    projection.projected_version,
+                );
+            }
+        }
+
+        let stored: Option<GuardState> = stored_guard.as_ref().and_then(|g| g.lane_state(&facet));
+
+        // A named facet is always a sequence-gated partial replace of its own
+        // keys; `decide()` is unchanged (Phase 15.2).
+        let effective_mode = if is_named_facet {
+            crate::adapter::OnExisting::Replace
+        } else {
+            projection.on_existing
+        };
+        let decision = decide(projection.operation, effective_mode, stored, event.sequence);
+        let was_tombstoned_default = !is_named_facet && stored.is_some_and(|s| s.deleted);
 
         match decision {
             WriteDecision::SkipIdempotent => {
@@ -224,14 +274,12 @@ impl StorageAdapter for KeyValueStore {
             WriteDecision::SkipAlreadyDeleted => {
                 // Still bump last_sequence so a later, truly out-of-order
                 // resurrection attempt compares against the highest delete
-                // sequence seen, not a stale one.
-                let bumped = KvGuard {
-                    last_sequence: event.sequence,
-                    last_event_id: event.event_id.clone(),
-                    deleted: true,
-                    permanent: false,
-                };
-                if let Err(e) = self.commit_guard(&guard_path, &bumped) {
+                // sequence seen, not a stale one. (Default facet only.)
+                let mut g = stored_guard.take().unwrap_or_default();
+                g.last_sequence = event.sequence;
+                g.last_event_id = event.event_id.clone();
+                g.deleted = true;
+                if let Err(e) = self.commit_guard(&guard_path, &g) {
                     return self.failure(AdapterError::WriteFailed(e.to_string()));
                 }
                 return AdapterResult::skipped_versioned(
@@ -254,6 +302,31 @@ impl StorageAdapter for KeyValueStore {
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                     Err(e) => return Err(e.into()),
                 }
+            } else if is_named_facet {
+                // Phase 15.4: shallow-merge the facet's own top-level keys into
+                // the existing value; every other key is preserved.
+                let facet_obj = projection
+                    .value
+                    .as_object()
+                    .ok_or("facet mapping must resolve to a JSON object")?;
+                let mut existing = match std::fs::read_to_string(&value_path) {
+                    Ok(s) => serde_json::from_str::<serde_json::Value>(&s)
+                        .unwrap_or_else(|_| serde_json::Value::Object(Default::default())),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        serde_json::Value::Object(Default::default())
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+                let existing_obj = existing
+                    .as_object_mut()
+                    .ok_or("existing value is not a JSON object")?;
+                for (k, v) in facet_obj {
+                    existing_obj.insert(k.clone(), v.clone());
+                }
+                if let Some(parent) = value_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&value_path, serde_json::to_string_pretty(&existing)?)?;
             } else {
                 if let Some(parent) = value_path.parent() {
                     std::fs::create_dir_all(parent)?;
@@ -270,16 +343,35 @@ impl StorageAdapter for KeyValueStore {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
-        // Commit the guard AFTER the write, via atomic rename. `deleted` is
-        // set whenever this write was a `Delete` — the tombstone is never
-        // removed.
-        let new_guard = KvGuard {
-            last_sequence: event.sequence,
-            last_event_id: event.event_id.clone(),
-            deleted: decision == WriteDecision::Delete,
-            permanent: decision == WriteDecision::Delete && projection.permanent,
-        };
-        if let Err(e) = self.commit_guard(&guard_path, &new_guard) {
+        // Commit the guard AFTER the write, via atomic rename, preserving lanes
+        // this event didn't touch (Phase 15.2).
+        let mut g = stored_guard.take().unwrap_or_default();
+        if is_named_facet {
+            let fg = g.facets.entry(facet.clone()).or_default();
+            fg.last_sequence = event.sequence;
+            fg.last_event_id = event.event_id.clone();
+            fg.deleted = false;
+            fg.permanent = false;
+        } else {
+            g.last_sequence = event.sequence;
+            g.last_event_id = event.event_id.clone();
+            g.deleted = decision == WriteDecision::Delete;
+            g.permanent = decision == WriteDecision::Delete && projection.permanent;
+            if decision == WriteDecision::Delete {
+                for fg in g.facets.values_mut() {
+                    fg.deleted = true;
+                    fg.permanent = projection.permanent;
+                    fg.last_sequence = event.sequence;
+                    fg.last_event_id = event.event_id.clone();
+                }
+            } else if was_tombstoned_default && decision == WriteDecision::Insert {
+                for fg in g.facets.values_mut() {
+                    fg.deleted = false;
+                    fg.permanent = false;
+                }
+            }
+        }
+        if let Err(e) = self.commit_guard(&guard_path, &g) {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 

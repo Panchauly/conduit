@@ -1,4 +1,4 @@
-# Phase 15 — Facet Partial Updates 🎯 (Planned)
+# Phase 15 — Facet Partial Updates 🎯 (Completed)
 
 **Goal:** An event can update a *named subset* of an entity's projected state — one facet — leaving the rest untouched, and two facets of the same entity can be updated by independent event streams that arrive in any order without one falsely superseding the other.
 
@@ -17,7 +17,7 @@ UserLoggedIn      seq 6   sets last_login
 
 ---
 
-## Phase 15.1 — Facet declaration & ownership validation 🧩 (Planned)
+## Phase 15.1 — Facet declaration & ownership validation 🧩 (Completed)
 
 **Scope**
 - New optional field on `SqlMapping`, `DocumentMapping`, `KvMapping`: `facet: Option<String>`, `#[serde(default)]`.
@@ -34,9 +34,14 @@ UserLoggedIn      seq 6   sets last_login
 - Zero change for every existing mapping — absent `facet` is the default facet, and nothing about the default lane's behaviour changes.
 - Facet vocabulary is the *only* addition to the mapping schema; `operation` / `on_existing` / `permanent` / `version` keep their Phase 11–14 meanings.
 
+**As built**
+- `facet: Option<String>` added to `SqlMapping` / `DocumentMapping` / `KvMapping` (`#[serde(default)]`); `facet_key()` normalizes `None → ""`. Projections (`SqlProjection` / `DocumentProjection` / `KvProjection`) carry the normalized `facet: String`.
+- Validation added to `runtime/validation.rs` (`validate_facets`, grouping mappings by table / collection / namespace): `FacetReplaceConflict`, `FacetDeleteNotDefault`, `FacetHasNoFields`, `FacetFieldOverlap`, `FacetKeyMismatch`.
+- **Implicit facet write mode.** 15.1 says "no mapping may use `on_existing: replace`" on a faceted entity, but a facet update still has to be sequence-gated rather than idempotent-skipped. Resolved by having the adapter pass `OnExisting::Replace` to `decide()` for a *named* facet lane regardless of the mapping's declared `on_existing` (which stays `ignore`). `decide()` itself is unchanged — the adapter just chooses the mode. The `replace` prohibition in validation is about *whole-entity* replace.
+
 ---
 
-## Phase 15.2 — Per-facet guard 🔑 (Planned)
+## Phase 15.2 — Per-facet guard 🔑 (Completed)
 
 **Scope**
 - SQL: `conduit_projection_state` primary key extends from `(target_table, entity_key)` to `(target_table, entity_key, facet)`. The default facet is stored as `''`. Existing rows are already default-facet rows — no data migration, the `''` default covers them.
@@ -48,9 +53,14 @@ UserLoggedIn      seq 6   sets last_login
 - Each facet lane is an independent Phase 12/13 state machine: highest sequence within the lane wins, redelivery is a no-op, resurrection and permanent tombstones work per the existing rules.
 - Disjoint-facet updates never interfere: `contact` seq 5 and `login` seq 6 both land regardless of arrival order.
 
+**As built**
+- SQL guard: `conduit_projection_state` gains `facet TEXT NOT NULL DEFAULT ''`, PK `(target_table, entity_key, facet)`. `SqliteAdapter::read_guard_lane` reads one lane. **Deviation:** there is *no* in-place migration — a guard table that predates Phase 15 (2-column PK) must be dropped. It is a derived cache and replay rebuilds it; the 3-column `ON CONFLICT` target cannot be satisfied by the old constraint, and `ALTER TABLE ADD COLUMN` can't add a PK column. All tests use fresh temp DBs; there are no deployed guard tables.
+- Document / KV guard sidecars: the default facet stays in the flat fields (a pre-Phase-15 sidecar and every non-faceted entity round-trips byte-for-byte — this keeps the Phase 13/14 guard-content assertions valid unchanged); named-facet lanes live in a `facets: { name: {last_sequence, last_event_id, deleted, permanent} }` map. `ProjectionGuard::lane_state` / `KvGuard::lane_state` return the Phase 12/13 `GuardState` for a lane.
+- `decide()` (`adapter/mod.rs`) is called unchanged — same signature, same body — with the lane's `Option<GuardState>`.
+
 ---
 
-## Phase 15.3 — SQL partial update 🗄️ (Planned)
+## Phase 15.3 — SQL partial update 🗄️ (Completed)
 
 **Scope**
 - A named-facet `SqlMapping` builds `INSERT INTO <table> (<key cols>, <facet cols>) VALUES (…) ON CONFLICT (<primary_key>) DO UPDATE SET <facet cols only = excluded.…>` — only the facet's columns appear in the `SET` list.
@@ -65,9 +75,14 @@ UserLoggedIn      seq 6   sets last_login
 - A faceted `users` row ends with each column at the value written by the highest-sequence event *for that column's facet*.
 - `Skipped(EntityAbsent)` for a facet update that races ahead of its entity's creation — see 15.5 for how replay avoids this.
 
+**As built**
+- `SqlMapping::build` emits, for a named-facet mapping, `INSERT INTO <table> (<all cols>) VALUES (…) ON CONFLICT (<primary_key>) DO UPDATE SET <non-key cols only>`. The entity-existence pre-check guarantees the `DO UPDATE` branch runs.
+- `SkipReason::EntityAbsent` added (shared across SQL / document / KV — not a KV- or SQL-only variant). It is *not* a `decide()` outcome: the adapter reads the default-facet lane and returns `EntityAbsent` before calling `decide()` on the facet lane.
+- Delete cascade / resurrection clear are one `UPDATE … WHERE target_table=? AND entity_key=? AND facet <> ''` inside the same transaction.
+
 ---
 
-## Phase 15.4 — Document & KV partial update 📄 (Planned)
+## Phase 15.4 — Document & KV partial update 📄 (Completed)
 
 **Scope**
 - **Document:** a named-facet `DocumentMapping` **shallow-merges** its resolved object into the existing entity document — its top-level keys replace, all other keys are preserved — then rewrites the file via atomic rename. Same default-facet existence pre-check and delete cascade as 15.3.
@@ -78,9 +93,13 @@ UserLoggedIn      seq 6   sets last_login
 - Same convergence as 15.3, under a single writer.
 - Only top-level keys are facet-owned — see Non-Goals on nested paths.
 
+**As built**
+- Document / KV adapters: for a named facet the write reads the existing entity file, shallow-merges the facet's resolved object's top-level keys (`existing_obj.insert(k, v)`), and rewrites via the existing atomic temp-then-rename. `Delete` and the default-facet full-write path are unchanged. A facet mapping whose `document` / `value` doesn't resolve to a JSON object is a `WriteFailed`.
+- Same default-facet existence pre-check (`EntityAbsent`) and delete cascade (mark every `facets` entry `deleted`) as 15.3, and a default-facet resurrection clears every `facets` entry.
+
 ---
 
-## Phase 15.5 — Sequence-ordered replay ⏱️ (Planned)
+## Phase 15.5 — Sequence-ordered replay ⏱️ (Completed)
 
 **Scope**
 - `events_from_path` / the replay loader currently orders a directory by **filename** (`replay.rs`) and NDJSON by line order. `Event.sequence` has been captured since Phase 11 and used only for *gating*, never *ordering*.
@@ -91,9 +110,12 @@ UserLoggedIn      seq 6   sets last_login
 - Replaying a directory / NDJSON stream of one entity's events yields the same projected state as applying them in sequence order, whatever the file names.
 - Live streaming is out of scope: an out-of-order facet-before-create in a live feed is still `Skipped(EntityAbsent)` (15.3). The contract is the same as Phase 12's sequence contract — the producer emits the create no later than the facet updates that depend on it.
 
+**As built**
+- `ReplayContext::run_stream_with_options` buffers the whole stream, then `sort_by_key(|e| e.sequence)` (a stable sort — the loader's sorted-file-name / line order breaks ties). **Simplification from the doc's `(entity_key, sequence)`:** a global stable sort by `sequence` alone is equivalent for the guarantee (each entity's events keep their relative order, so its create precedes its facet updates) and needs no routing/mapping resolution inside the loader. Cost: the stream is fully buffered rather than streamed — acceptable given determinism is the point of replay.
+
 ---
 
-## Phase 15.6 — Determinism & verification suite 🧪 (Planned)
+## Phase 15.6 — Determinism & verification suite 🧪 (Completed)
 
 | Test | Asserts |
 |---|---|
@@ -108,6 +130,8 @@ UserLoggedIn      seq 6   sets last_login
 | `facet_cross_adapter.rs` | Same faceted stream into SQL + document → column/key values match. |
 
 **Guarantee under test:** for a faceted entity, each facet's projected state is the Phase 12/13 pure function of that facet's delivered events; facets do not interfere; the entity exists iff its default facet's highest-sequence event is not a delete.
+
+**As built** — all nine test files exist under `crates/conduit-core/tests/` with those names and pass. Two extra `validate_projection_config` cases (`FacetDeleteNotDefault`, `FacetKeyMismatch`) were added to `tests/validation.rs`. Full workspace: `cargo build`, `cargo test` (176 tests), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` all clean.
 
 ---
 

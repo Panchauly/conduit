@@ -348,8 +348,24 @@ impl ReplayContext {
         let mut report = ReplayReport::new(started_at);
         let cap = opts.max_per_event_summaries;
 
+        // PHASE 15.5: replay is sequence-ordered, not file-name / line ordered.
+        // `Event.sequence` has been captured since Phase 11 and used only for
+        // *gating*; ordering the whole stream by it delivers every entity's
+        // events in the order `decide()` needs — the create before any facet
+        // update for the same entity — regardless of how the input happened to
+        // be named or laid out. A stable sort keeps the loader's order
+        // (sorted file names / line order) for equal sequences, so replay
+        // stays deterministic. The doc frames this as `(entity_key, sequence)`;
+        // a global stable sort by `sequence` is equivalent for the guarantee
+        // (each entity's events keep their relative order) without needing to
+        // resolve routing/mappings inside the loader.
+        let mut buffered: Vec<Event> = Vec::new();
         for item in events {
-            let event = item?;
+            buffered.push(item?);
+        }
+        buffered.sort_by_key(|e| e.sequence);
+
+        for event in buffered {
             let exec = if opts.validate_routing
                 && route_with_rules(&event, &self.routing_rules).is_empty()
             {

@@ -100,6 +100,37 @@ pub enum ValidationIssue {
         event_type: String,
         adapters: Vec<AdapterId>,
     },
+    /// Phase 15.1: a faceted entity has a mapping using `on_existing: replace` —
+    /// whole-entity replace and facets are mutually exclusive.
+    FacetReplaceConflict {
+        entity: String,
+        kind: &'static str,
+    },
+    /// Phase 15.1: `operation: delete` on a named-facet mapping. You delete an
+    /// entity, not a facet — delete is only valid on the default facet.
+    FacetDeleteNotDefault {
+        event: String,
+        kind: &'static str,
+    },
+    /// Phase 15.1: a named facet owns no non-key field — nothing for its lane
+    /// to write.
+    FacetHasNoFields {
+        event: String,
+        kind: &'static str,
+    },
+    /// Phase 15.1: two facets of one entity both claim the same field — they
+    /// would race their independent sequence gates.
+    FacetFieldOverlap {
+        entity: String,
+        field: String,
+        kind: &'static str,
+    },
+    /// Phase 15.1: a named facet's identity (primary_key / id / key) differs
+    /// from the entity's — it must identify the same entity.
+    FacetKeyMismatch {
+        event: String,
+        kind: &'static str,
+    },
 }
 
 impl fmt::Display for ValidationIssue {
@@ -260,6 +291,45 @@ impl fmt::Display for ValidationIssue {
                     adapters.join(", ")
                 )
             }
+            ValidationIssue::FacetReplaceConflict { entity, kind } => {
+                write!(
+                    f,
+                    "{} facet: entity {:?} is faceted, so no mapping may use 'on_existing: replace'",
+                    kind, entity
+                )
+            }
+            ValidationIssue::FacetDeleteNotDefault { event, kind } => {
+                write!(
+                    f,
+                    "{} facet: mapping for event {:?} has 'operation: delete' on a named facet (delete is default-facet only)",
+                    kind, event
+                )
+            }
+            ValidationIssue::FacetHasNoFields { event, kind } => {
+                write!(
+                    f,
+                    "{} facet: mapping for event {:?} declares a facet but owns no non-key field",
+                    kind, event
+                )
+            }
+            ValidationIssue::FacetFieldOverlap {
+                entity,
+                field,
+                kind,
+            } => {
+                write!(
+                    f,
+                    "{} facet: entity {:?} has two facets both claiming field {:?}",
+                    kind, entity, field
+                )
+            }
+            ValidationIssue::FacetKeyMismatch { event, kind } => {
+                write!(
+                    f,
+                    "{} facet: mapping for event {:?} has a facet identity that differs from the entity's primary key",
+                    kind, event
+                )
+            }
         }
     }
 }
@@ -384,6 +454,103 @@ fn document_template_empty(doc: &serde_json::Value) -> bool {
     doc.is_null()
         || doc.as_object().is_some_and(|o| o.is_empty())
         || doc.as_array().is_some_and(|a| a.is_empty())
+}
+
+/// One mapping, normalized for Phase 15.1 facet validation.
+struct FacetView {
+    event: String,
+    /// table / collection / namespace.
+    entity: String,
+    /// `""` = default facet.
+    facet: String,
+    on_existing: OnExisting,
+    operation: Operation,
+    /// primary_key column(s) / `[id path]` / `[key path]`, in declared order.
+    identity: Vec<String>,
+    /// non-key column names / top-level object keys this mapping writes.
+    fields: Vec<String>,
+    kind: &'static str,
+}
+
+/// Phase 15.1: an entity partitioned into facets must keep them consistent —
+/// no whole-entity replace, disjoint field ownership, one shared identity, and
+/// delete only on the default facet.
+fn validate_facets(mut views: Vec<FacetView>, report: &mut ValidationReport) {
+    // Deterministic order regardless of HashMap iteration.
+    views.sort_by(|a, b| (a.entity.as_str(), a.event.as_str()).cmp(&(&b.entity, &b.event)));
+
+    let mut by_entity: std::collections::BTreeMap<(&str, &str), Vec<&FacetView>> =
+        std::collections::BTreeMap::new();
+    for v in &views {
+        by_entity
+            .entry((v.kind, v.entity.as_str()))
+            .or_default()
+            .push(v);
+    }
+
+    for ((kind, entity), group) in by_entity {
+        let is_faceted = group.iter().any(|v| !v.facet.is_empty());
+        if !is_faceted {
+            continue;
+        }
+
+        // No whole-entity replace anywhere on a faceted entity.
+        if group.iter().any(|v| v.on_existing == OnExisting::Replace) {
+            report.push(ValidationIssue::FacetReplaceConflict {
+                entity: entity.to_string(),
+                kind,
+            });
+        }
+
+        // Every mapping for a faceted entity shares one identity.
+        let canonical = group
+            .iter()
+            .find(|v| v.facet.is_empty())
+            .or_else(|| group.first())
+            .map(|v| v.identity.clone())
+            .unwrap_or_default();
+        for v in &group {
+            if v.identity != canonical {
+                report.push(ValidationIssue::FacetKeyMismatch {
+                    event: v.event.clone(),
+                    kind,
+                });
+            }
+        }
+
+        // Named-facet rules + disjoint field ownership.
+        let mut owner: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+        for v in &group {
+            if !v.facet.is_empty() {
+                if v.operation == Operation::Delete {
+                    report.push(ValidationIssue::FacetDeleteNotDefault {
+                        event: v.event.clone(),
+                        kind,
+                    });
+                }
+                if v.fields.is_empty() {
+                    report.push(ValidationIssue::FacetHasNoFields {
+                        event: v.event.clone(),
+                        kind,
+                    });
+                }
+            }
+            for field in &v.fields {
+                match owner.get(field.as_str()) {
+                    Some(existing) if *existing != v.facet.as_str() => {
+                        report.push(ValidationIssue::FacetFieldOverlap {
+                            entity: entity.to_string(),
+                            field: field.clone(),
+                            kind,
+                        });
+                    }
+                    _ => {
+                        owner.insert(field.as_str(), v.facet.as_str());
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn validate_route_dependencies(
@@ -681,6 +848,61 @@ pub fn validate_projection_config(
                 reason: "version must be >= 1".into(),
             });
         }
+    }
+
+    // Phase 15.1: facet declaration & ownership validation, one entity group at
+    // a time (a group is a table / collection / namespace).
+    {
+        fn object_keys(v: &serde_json::Value) -> Vec<String> {
+            v.as_object()
+                .map(|o| o.keys().cloned().collect())
+                .unwrap_or_default()
+        }
+        let mut views: Vec<FacetView> = Vec::new();
+        for m in sql.values() {
+            let identity: Vec<String> = m.primary_key.iter().cloned().collect();
+            let fields: Vec<String> = m
+                .columns
+                .keys()
+                .filter(|c| !identity.contains(c))
+                .cloned()
+                .collect();
+            views.push(FacetView {
+                event: m.event.clone(),
+                entity: m.table.clone(),
+                facet: m.facet_key().to_string(),
+                on_existing: m.on_existing,
+                operation: m.operation,
+                identity,
+                fields,
+                kind: "SQL",
+            });
+        }
+        for m in doc.values() {
+            views.push(FacetView {
+                event: m.event.clone(),
+                entity: m.collection.clone(),
+                facet: m.facet_key().to_string(),
+                on_existing: m.on_existing,
+                operation: m.operation,
+                identity: vec![m.id.clone()],
+                fields: object_keys(&m.document),
+                kind: "document",
+            });
+        }
+        for m in kv.values() {
+            views.push(FacetView {
+                event: m.event.clone(),
+                entity: m.namespace.clone(),
+                facet: m.facet_key().to_string(),
+                on_existing: m.on_existing,
+                operation: m.operation,
+                identity: vec![m.key.clone()],
+                fields: object_keys(&m.value),
+                kind: "key-value",
+            });
+        }
+        validate_facets(views, &mut report);
     }
 
     for (event_type, adapter_ids) in routing {

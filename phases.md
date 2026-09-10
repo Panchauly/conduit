@@ -26,7 +26,7 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 12 | Sequence-Gated Upsert (12.1–12.6) | ✅ Completed | [phases/phase-12-sequence-gated-upsert.md](phases/phase-12-sequence-gated-upsert.md) |
 | 13 | Deletion & Tombstones (13.1–13.6) | ✅ Completed | [phases/phase-13-deletion-tombstones.md](phases/phase-13-deletion-tombstones.md) |
 | 14 | Cache Adapter (Key-Value) (14.1–14.5) | ✅ Completed | [phases/phase-14-cache-adapter.md](phases/phase-14-cache-adapter.md) |
-| 15 | Facet Partial Updates (15.1–15.6) | 🎯 Planned | [phases/phase-15-facet-partial-updates.md](phases/phase-15-facet-partial-updates.md) |
+| 15 | Facet Partial Updates (15.1–15.6) | ✅ Completed | [phases/phase-15-facet-partial-updates.md](phases/phase-15-facet-partial-updates.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md)
 

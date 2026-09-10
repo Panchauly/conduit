@@ -25,6 +25,10 @@ pub struct KvProjection {
     pub operation: Operation,
     /// `operation: delete` only (Phase 13.4): mark the tombstone permanent.
     pub permanent: bool,
+    /// Phase 15.1: the facet this mapping owns, normalized (`""` = default
+    /// facet / whole value). A named facet shallow-merges its top-level keys
+    /// and gates on its own lane in the guard sidecar's `facets` map.
+    pub facet: String,
 }
 
 /// Owned runtime builder — analog of `SqlRuntimeBuilder` / `DocumentRuntimeBuilder`.
@@ -63,6 +67,7 @@ impl KvRuntimeBuilder {
                 on_existing: mapping.on_existing,
                 operation: mapping.operation,
                 permanent: mapping.permanent,
+                facet: mapping.facet_key().to_string(),
             });
         }
 
@@ -101,6 +106,7 @@ impl KvRuntimeBuilder {
             on_existing: mapping.on_existing,
             operation: mapping.operation,
             permanent: mapping.permanent,
+            facet: mapping.facet_key().to_string(),
         })
     }
 }
