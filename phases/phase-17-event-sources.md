@@ -62,6 +62,8 @@
 - `commit` is a no-op when `position <= committed` (monotonicity enforced at the source, not just by the loop).
 - Named `conduit_source_state` in the doc; the file is per-source rather than a single table — the projection guard's SQL analog doesn't apply since sources aren't SQL.
 
+**Offset ownership (Phase 18.8 correction).** Conduit's checkpoint file is a **fallback for sources that have no offset store of their own** — a plain directory, a pipe. A source backed by a system that *owns* offsets (a Kafka consumer group, a log table with its own cursor) uses that system's offset store instead, per the [`architecture.md` §1.1](../architecture.md) boundary — "consumer offsets" belong to Transport, not Conduit. `directory` and `stdin` keep the checkpoint file; this is guidance for a future Kafka / log-table source, no code change.
+
 ---
 
 ## Phase 17.3 — The continuous run loop 🔁 (Completed)

@@ -29,16 +29,18 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 15 | Facet Partial Updates (15.1–15.6) | ✅ Completed | [phases/phase-15-facet-partial-updates.md](phases/phase-15-facet-partial-updates.md) |
 | 16 | Graph Adapter (Nodes & Edges) (16.1–16.6) | ✅ Completed | [phases/phase-16-graph-adapter.md](phases/phase-16-graph-adapter.md) |
 | 17 | Event Sources (17.1–17.6) | ✅ Completed | [phases/phase-17-event-sources.md](phases/phase-17-event-sources.md) |
+| 18 | Consolidation & Release Hygiene (18.1–18.8) | ✅ Completed | [phases/phase-18-consolidation-release-hygiene.md](phases/phase-18-consolidation-release-hygiene.md) |
 
-Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md)
+Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md) · Engine/producer boundary: [phases/producer-contract.md](phases/producer-contract.md)
 
 ---
 
-## Beyond Phase 17
+## Beyond Phase 18
 
-All four storage kinds from the project pitch exist (Phases 11–16, file-backed, one `decide()` core). Phase 17 adds the symmetric source side. Candidate future work, not yet planned in detail:
+All four storage kinds from the project pitch exist (Phases 11–16, file-backed, one `decide()` core), the symmetric source side exists (Phase 17), and the debt from that run is paid down (Phase 18). Conduit is **projection-only** — it consumes a log it does not own; producing / storing the log is permanently out of scope ([`architecture.md` §1.1](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
+
+Candidate future work, not yet planned in detail:
 
 - **Later backends** — Postgres SQL backend, Redis key-value backend, Neo4j/Cypher graph backend (each currently single-implementation, like SQLite / file-backed).
-- **Later sources** — Kafka, Postgres-outbox, and HTTP-ingest sources on the Phase 17 `EventSource` trait.
+- **Later sources** — Kafka, Postgres-outbox, and HTTP-ingest sources on the Phase 17 `EventSource` trait. A source whose backing system owns offsets (Kafka consumer group, log cursor) uses *that*, not Conduit's checkpoint file (Phase 18.8).
 - **Subgraph-per-event** — one mapping emitting several graph records atomically (deferred out of Phase 16).
-- **Housekeeping** — delete dead `sql/validate.rs` + `document/validate.rs`; set `workspace.resolver`; `RELEASES/` note for phases 11–17.
