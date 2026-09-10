@@ -165,6 +165,9 @@ pub enum AdapterConfig {
 
     #[serde(rename = "graph")]
     Graph(GraphAdapterConfig),
+
+    #[serde(rename = "postgres")]
+    Postgres(PostgresAdapterConfig),
 }
 
 #[derive(Debug, Deserialize)]
@@ -245,6 +248,61 @@ pub struct GraphAdapterConfig {
 #[derive(Debug, Deserialize)]
 pub struct GraphConfig {
     pub root: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PostgresAdapterConfig {
+    pub id: String,
+    pub priority: u32,
+    pub config: PostgresConfig,
+
+    #[serde(default)]
+    pub capabilities: Option<AdapterCapabilities>,
+
+    #[serde(default)]
+    pub depends_on: Vec<AdapterId>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PostgresConfig {
+    /// `postgres://user:pass@host:port/db`. May contain `${ENV_VAR}` references
+    /// (Phase 19.2) so credentials stay out of the committed config.
+    pub url: String,
+    /// r2d2 pool size (default 4).
+    #[serde(default)]
+    pub pool_size: Option<u32>,
+}
+
+/// Expand `${VAR}` references against the process environment. An unset
+/// variable is left literally in place (surfaces as a connection error rather
+/// than a silent empty string).
+pub fn expand_env(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find('}') {
+            Some(end) => {
+                let name = &after[..end];
+                match std::env::var(name) {
+                    Ok(v) => out.push_str(&v),
+                    Err(_) => {
+                        out.push_str("${");
+                        out.push_str(name);
+                        out.push('}');
+                    }
+                }
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 // ------------------------------------------------------------
@@ -344,6 +402,7 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => &cfg.id,
             AdapterConfig::KeyValue(cfg) => &cfg.id,
             AdapterConfig::Graph(cfg) => &cfg.id,
+            AdapterConfig::Postgres(cfg) => &cfg.id,
         }
     }
 
@@ -353,6 +412,7 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => cfg.priority,
             AdapterConfig::KeyValue(cfg) => cfg.priority,
             AdapterConfig::Graph(cfg) => cfg.priority,
+            AdapterConfig::Postgres(cfg) => cfg.priority,
         }
     }
 
@@ -363,6 +423,7 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::KeyValue(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Graph(cfg) => cfg.capabilities.as_deref(),
+            AdapterConfig::Postgres(cfg) => cfg.capabilities.as_deref(),
         }
     }
 
@@ -372,6 +433,7 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => &cfg.depends_on,
             AdapterConfig::KeyValue(cfg) => &cfg.depends_on,
             AdapterConfig::Graph(cfg) => &cfg.depends_on,
+            AdapterConfig::Postgres(cfg) => &cfg.depends_on,
         }
     }
 }
@@ -440,5 +502,55 @@ adapters:
         let cfg: ConduitConfig = serde_yaml::from_str(yaml).unwrap();
         cfg.validate().unwrap();
         assert!(cfg.sources.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod phase19_tests {
+    use super::*;
+
+    #[test]
+    fn expand_env_substitutes_and_leaves_unset_literal() {
+        // SAFETY: single-threaded test setup.
+        unsafe {
+            std::env::set_var("CONDUIT_TEST_PGHOST", "db.internal");
+        }
+        assert_eq!(
+            expand_env("postgres://u@${CONDUIT_TEST_PGHOST}:5432/app"),
+            "postgres://u@db.internal:5432/app"
+        );
+        assert_eq!(
+            expand_env("postgres://u@${CONDUIT_UNSET_XYZ}/app"),
+            "postgres://u@${CONDUIT_UNSET_XYZ}/app"
+        );
+        assert_eq!(expand_env("no vars here"), "no vars here");
+        unsafe {
+            std::env::remove_var("CONDUIT_TEST_PGHOST");
+        }
+    }
+
+    #[test]
+    fn parses_a_postgres_adapter() {
+        let yaml = r#"
+version: 1
+routing: { file: routing.json }
+adapters:
+  - type: postgres
+    id: pg-primary
+    priority: 10
+    capabilities: [write, upsert, delete, transactions]
+    config:
+      url: postgres://conduit@localhost/readmodel
+      pool_size: 8
+"#;
+        let cfg: ConduitConfig = serde_yaml::from_str(yaml).unwrap();
+        cfg.validate().unwrap();
+        match &cfg.adapters[0] {
+            AdapterConfig::Postgres(p) => {
+                assert_eq!(p.id, "pg-primary");
+                assert_eq!(p.config.pool_size, Some(8));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

@@ -36,6 +36,11 @@ pub enum ValidationIssue {
         event: String,
         reason: String,
     },
+    /// Phase 19.5: a Postgres adapter's connection config is unusable.
+    InvalidPostgresConfig {
+        adapter_id: String,
+        reason: String,
+    },
     UnknownAdapter {
         event_type: String,
         adapter_id: String,
@@ -172,6 +177,13 @@ impl fmt::Display for ValidationIssue {
             }
             ValidationIssue::InvalidGraphMapping { event, reason } => {
                 write!(f, "invalid graph mapping for event {:?}: {}", event, reason)
+            }
+            ValidationIssue::InvalidPostgresConfig { adapter_id, reason } => {
+                write!(
+                    f,
+                    "invalid postgres adapter {:?} config: {}",
+                    adapter_id, reason
+                )
             }
             ValidationIssue::UnknownAdapter {
                 event_type,
@@ -455,8 +467,10 @@ fn build_adapter_by_id<'a>(
     map
 }
 
-fn is_sqlite(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::Sqlite(_))
+/// Any SQL backend (Phase 19) — SQLite or Postgres. Both consume `SqlMapping`s
+/// and share the mapping-coverage / capability rules.
+fn is_sql(a: &AdapterConfig) -> bool {
+    matches!(a, AdapterConfig::Sqlite(_) | AdapterConfig::Postgres(_))
 }
 
 fn is_file(a: &AdapterConfig) -> bool {
@@ -723,6 +737,26 @@ pub fn validate_projection_config(
     let mut report = ValidationReport::default();
     let adapters_by_id = build_adapter_by_id(config, &mut report);
     let adapter_meta = adapter_metadata_map(config);
+
+    // Phase 19.5: a Postgres adapter's `url` must be non-empty and parse.
+    // (The 19.3 column-existence check is deferred — it needs a live DB; a
+    // missing column surfaces as a clear `WriteFailed` at run time instead.)
+    for a in &config.adapters {
+        if let AdapterConfig::Postgres(cfg) = a {
+            let url = crate::runtime::config::expand_env(&cfg.config.url);
+            if url.trim().is_empty() {
+                report.push(ValidationIssue::InvalidPostgresConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: "`url` is empty".into(),
+                });
+            } else if url.parse::<::postgres::Config>().is_err() {
+                report.push(ValidationIssue::InvalidPostgresConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: format!("`url` does not parse: {url}"),
+                });
+            }
+        }
+    }
 
     for (event_type, adapter_ids) in routing {
         let mut seen_route: HashSet<&str> = HashSet::new();
@@ -1046,7 +1080,7 @@ pub fn validate_projection_config(
                 continue;
             };
 
-            if is_sqlite(ac) {
+            if is_sql(ac) {
                 let Some(sql_map) = sql.get(event_type) else {
                     report.push(ValidationIssue::MissingSqlMapping {
                         event_type: event_type.clone(),
@@ -1149,7 +1183,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(is_sqlite)
+                .map(is_sql)
                 .unwrap_or(false)
         });
         if !has_sqlite {
