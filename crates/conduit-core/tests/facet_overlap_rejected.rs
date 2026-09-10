@@ -80,9 +80,15 @@ columns:
     routing.insert("A".to_string(), vec!["sql-primary".into()]);
     routing.insert("B".to_string(), vec!["sql-primary".into()]);
 
-    let err =
-        validate_projection_config(&config, &routing, &sqlm, &HashMap::new(), &HashMap::new())
-            .unwrap_err();
+    let err = validate_projection_config(
+        &config,
+        &routing,
+        &sqlm,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(
         err.to_string().contains("both claiming field \"email\""),
         "{err}"

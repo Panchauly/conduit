@@ -66,7 +66,8 @@ fn delete_kv_mapping_on_non_delete_adapter_fails_validation() {
     let sql: HashMap<String, SqlMapping> = HashMap::new();
     let doc: HashMap<String, DocumentMapping> = HashMap::new();
 
-    let err = validate_projection_config(&config, &routing(), &sql, &doc, &kv).unwrap_err();
+    let err = validate_projection_config(&config, &routing(), &sql, &doc, &kv, &HashMap::new())
+        .unwrap_err();
     assert!(
         err.to_string().contains("delete"),
         "expected a delete capability mismatch: {err}"
@@ -86,5 +87,5 @@ fn delete_kv_mapping_on_declared_delete_adapter_validates() {
     let sql: HashMap<String, SqlMapping> = HashMap::new();
     let doc: HashMap<String, DocumentMapping> = HashMap::new();
 
-    validate_projection_config(&config, &routing(), &sql, &doc, &kv).unwrap();
+    validate_projection_config(&config, &routing(), &sql, &doc, &kv, &HashMap::new()).unwrap();
 }

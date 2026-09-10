@@ -124,7 +124,14 @@ document:
     // -----------------------------
     // Execute
     // -----------------------------
-    let report = execute_event(&config, sql_mappings, doc_mappings, HashMap::new(), event);
+    let report = execute_event(
+        &config,
+        sql_mappings,
+        doc_mappings,
+        HashMap::new(),
+        HashMap::new(),
+        event,
+    );
 
     // -----------------------------
     // Assert

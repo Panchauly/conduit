@@ -213,6 +213,7 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
         sql_mappings.clone(),
         HashMap::new(),
         HashMap::new(),
+        HashMap::new(),
         Arc::new(registry()),
     );
 
@@ -267,6 +268,7 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
         let report = execute_event_with_upcasters(
             &live_config,
             sql_mappings.clone(),
+            HashMap::new(),
             HashMap::new(),
             HashMap::new(),
             event,

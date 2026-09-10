@@ -13,7 +13,8 @@ use std::sync::Arc;
 
 use crate::{
     adapter::{
-        document::mapping::DocumentMapping, keyvalue::mapping::KvMapping, sql::mapping::SqlMapping,
+        document::mapping::DocumentMapping, graph::mapping::GraphMapping,
+        keyvalue::mapping::KvMapping, sql::mapping::SqlMapping,
     },
     dispatch::dispatch,
     event::Event,
@@ -85,6 +86,7 @@ pub fn execute_event(
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
+    graph_mappings: HashMap<String, GraphMapping>,
     event: Event,
 ) -> ExecutionReport {
     execute_event_with_upcasters(
@@ -92,6 +94,7 @@ pub fn execute_event(
         sql_mappings,
         document_mappings,
         kv_mappings,
+        graph_mappings,
         event,
         Arc::new(UpcasterRegistry::new()),
     )
@@ -99,11 +102,13 @@ pub fn execute_event(
 
 /// Same as [execute_event], with an explicit [UpcasterRegistry] (Phase 10.3) for
 /// projecting version-mismatched event payloads before mapping.
+#[allow(clippy::too_many_arguments)]
 pub fn execute_event_with_upcasters(
     config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
+    graph_mappings: HashMap<String, GraphMapping>,
     event: Event,
     upcasters: Arc<UpcasterRegistry>,
 ) -> ExecutionReport {
@@ -112,6 +117,7 @@ pub fn execute_event_with_upcasters(
         sql_mappings,
         document_mappings,
         kv_mappings,
+        graph_mappings,
         upcasters,
     );
     let adapter_meta = crate::runtime::adapter_metadata_map(config);
@@ -121,24 +127,32 @@ pub fn execute_event_with_upcasters(
 /// Execute a single event with an explicit [ExecutionMode] (e.g. [execution::ExecutionMode::DryRun] for no-write simulation).
 /// Same as [execute_event] when mode is [execution::ExecutionMode::Run].
 /// When mode is DryRun, the pipeline runs but adapters are expected to skip persistence (adapter support is required for true dry-run).
+#[allow(clippy::too_many_arguments)]
 pub fn execute_event_with_mode(
     config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
+    graph_mappings: HashMap<String, GraphMapping>,
     event: Event,
     mode: crate::execution::ExecutionMode,
 ) -> ExecutionReport {
     match mode {
-        crate::execution::ExecutionMode::Run => {
-            execute_event(config, sql_mappings, document_mappings, kv_mappings, event)
-        }
+        crate::execution::ExecutionMode::Run => execute_event(
+            config,
+            sql_mappings,
+            document_mappings,
+            kv_mappings,
+            graph_mappings,
+            event,
+        ),
         crate::execution::ExecutionMode::DryRun => {
             let mut adapters = build_adapters_from_config(
                 config,
                 sql_mappings,
                 document_mappings,
                 kv_mappings,
+                graph_mappings,
                 Arc::new(UpcasterRegistry::new()),
             );
             let adapter_meta = crate::runtime::adapter_metadata_map(config);

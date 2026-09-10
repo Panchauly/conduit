@@ -98,7 +98,15 @@ fn rejects_unknown_adapter_in_routing() {
         "UserCreated".to_string(),
         vec!["ghost-adapter".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("ghost-adapter"));
 }
 
@@ -114,7 +122,15 @@ fn rejects_missing_sql_mapping_for_routed_sqlite() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("no SQL mapping"));
 }
 
@@ -130,7 +146,15 @@ fn rejects_missing_document_mapping() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("no document mapping"));
 }
 
@@ -152,7 +176,15 @@ fn rejects_capability_mismatch() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("idempotent"));
 }
 
@@ -177,7 +209,15 @@ fn accepts_idempotent_when_adapter_declares_it() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap();
+    validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -193,7 +233,15 @@ fn accepts_empty_requires_capabilities() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap();
+    validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -210,7 +258,15 @@ fn rejects_unrouted_sql_mapping() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("OrderPlaced") || r.to_string().contains("never routed"));
 }
 
@@ -244,7 +300,15 @@ fn rejects_sql_mapping_when_route_has_only_file_adapters() {
     doc.insert("OnlyDoc".to_string(), dm);
     let mut routing = HashMap::new();
     routing.insert("OnlyDoc".to_string(), vec!["doc-readmodel".into()]);
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("no sqlite adapter") || r.to_string().contains("SQL mapping"));
 }
 
@@ -278,7 +342,15 @@ fn rejects_document_mapping_without_file_on_route() {
     doc.insert("SqlOnly".to_string(), dm);
     let mut routing = HashMap::new();
     routing.insert("SqlOnly".to_string(), vec!["sql-primary".into()]);
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("file adapter") || r.to_string().contains("document mapping"));
 }
 
@@ -297,7 +369,15 @@ fn rejects_mapping_key_mismatch_sql() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("map key"));
     assert!(r.to_string().contains("WrongKey"));
 }
@@ -319,7 +399,15 @@ fn rejects_duplicate_adapter_on_same_route() {
             "doc-readmodel".into(),
         ],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("more than once"));
     assert!(r.to_string().contains("sql-primary"));
 }
@@ -372,7 +460,15 @@ fn rejects_duplicate_adapter_ids_in_config() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("duplicate adapter id"));
 }
 
@@ -391,7 +487,15 @@ fn rejects_empty_document_template_object() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("empty") || r.to_string().contains("{}"));
 }
 
@@ -410,7 +514,15 @@ fn rejects_sql_mapping_with_zero_version() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("version must be >= 1"));
 }
 
@@ -429,7 +541,15 @@ fn rejects_document_mapping_with_zero_version() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("version must be >= 1"));
 }
 
@@ -446,7 +566,15 @@ fn rejects_dependency_not_on_route() {
     doc.insert("UserCreated".to_string(), doc_uc());
     let mut routing = HashMap::new();
     routing.insert("UserCreated".to_string(), vec!["doc-readmodel".into()]);
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("not on this route"));
 }
 
@@ -469,7 +597,15 @@ fn rejects_dependency_cycle_adapters_sorted() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     let ValidationReport(issues) = r;
     let cycle = issues
         .iter()
@@ -537,7 +673,15 @@ fn rejects_sql_primary_key_not_in_columns() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("ghost_pk"));
     assert!(r.to_string().contains("not found in columns"));
 }
@@ -557,7 +701,15 @@ fn rejects_document_mapping_with_empty_id() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("empty id"));
 }
 
@@ -578,7 +730,15 @@ fn rejects_sql_composite_primary_key_with_one_missing_column() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("ghost_col"));
     assert!(r.to_string().contains("not found in columns"));
 }
@@ -598,7 +758,15 @@ fn rejects_document_mapping_with_id_not_a_payload_or_metadata_path() {
         "UserCreated".to_string(),
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(r.to_string().contains("'payload.' or 'metadata.' path"));
 }
 
@@ -623,7 +791,15 @@ fn phase15_rejects_delete_on_a_named_facet() {
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
     routing.insert("UserEmailCleared".to_string(), vec!["sql-primary".into()]);
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(
         r.to_string().contains("delete is default-facet only"),
         "{r}"
@@ -651,7 +827,15 @@ fn phase15_rejects_facet_identity_that_differs_from_the_entity() {
         vec!["sql-primary".into(), "doc-readmodel".into()],
     );
     routing.insert("UserEmailChanged".to_string(), vec!["sql-primary".into()]);
-    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    let r = validate_projection_config(
+        &config,
+        &routing,
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(
         r.to_string()
             .contains("differs from the entity's primary key"),

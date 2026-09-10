@@ -92,8 +92,15 @@ fn delete_mapping_on_non_delete_adapter_fails_validation() {
     let mut doc = HashMap::new();
     doc.insert("UserDeleted".to_string(), ignore_doc_mapping());
 
-    let err =
-        validate_projection_config(&config, &routing(), &sql, &doc, &HashMap::new()).unwrap_err();
+    let err = validate_projection_config(
+        &config,
+        &routing(),
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(
         err.to_string().contains("delete"),
         "expected a delete capability mismatch: {err}"
@@ -113,5 +120,13 @@ fn delete_mapping_on_declared_delete_adapter_validates() {
     let mut doc = HashMap::new();
     doc.insert("UserDeleted".to_string(), ignore_doc_mapping());
 
-    validate_projection_config(&config, &routing(), &sql, &doc, &HashMap::new()).unwrap();
+    validate_projection_config(
+        &config,
+        &routing(),
+        &sql,
+        &doc,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap();
 }
