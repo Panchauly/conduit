@@ -43,12 +43,26 @@ pub struct DocumentMapping {
     #[serde(default)]
     pub permanent: bool,
 
+    /// Phase 15.1: the named facet this mapping owns. `None` → the **default
+    /// facet** (the whole document — every pre-Phase-15 mapping).
+    /// `Some("contact")` → this mapping shallow-merges only its own top-level
+    /// keys into the existing document and gates on its own per-facet sequence
+    /// lane. A named facet is always a sequence-gated partial replace;
+    /// `operation: delete` is only valid on the default facet.
+    #[serde(default)]
+    pub facet: Option<String>,
+
     /// Capabilities adapters must provide to run this projection.
     #[serde(default)]
     pub requires_capabilities: Vec<AdapterCapability>,
 }
 
 impl DocumentMapping {
+    /// Normalized facet key — `""` for the default facet (Phase 15.1).
+    pub fn facet_key(&self) -> &str {
+        self.facet.as_deref().unwrap_or("")
+    }
+
     /// Build document JSON from event payload + metadata, plus the resolved
     /// entity identity (Phase 11.1), canonicalized to a string.
     pub fn apply(&self, event: &Event) -> Result<(Value, String), DocumentError> {

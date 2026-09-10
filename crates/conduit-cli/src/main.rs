@@ -427,6 +427,7 @@ fn format_skip_reason(reason: SkipReason) -> &'static str {
         SkipReason::UnsupportedVersion => "unsupported version: no upcaster chain",
         SkipReason::AlreadyDeleted => "already deleted",
         SkipReason::Tombstoned => "permanently tombstoned",
+        SkipReason::EntityAbsent => "entity absent (facet update with no created entity)",
     }
 }
 

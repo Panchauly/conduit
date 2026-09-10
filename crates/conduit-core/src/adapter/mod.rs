@@ -55,6 +55,13 @@ pub enum SkipReason {
     /// for this key, `delete` or `upsert`, is rejected. Terminal; nothing
     /// resurrects it.
     Tombstoned,
+    /// Phase 15.3: a named-facet update whose entity does not exist (or is
+    /// tombstoned) in the default facet. A facet cannot partially-update a row
+    /// that was never created, and only a default-facet `upsert` resurrects a
+    /// deleted entity — a facet update never does. Not a `decide()` outcome:
+    /// the adapter checks the default-facet guard *before* running `decide()`
+    /// on the facet's own lane.
+    EntityAbsent,
 }
 
 /// Outcome of a single adapter invocation (Phase 12.1; extended Phase 13.1

@@ -601,3 +601,60 @@ fn rejects_document_mapping_with_id_not_a_payload_or_metadata_path() {
     let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
     assert!(r.to_string().contains("'payload.' or 'metadata.' path"));
 }
+
+#[test]
+fn phase15_rejects_delete_on_a_named_facet() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sql_uc());
+    sql.insert(
+        "UserEmailCleared".to_string(),
+        serde_yaml::from_str::<SqlMapping>(
+            "event: UserEmailCleared\ntable: users\nprimary_key: id\nversion: 1\nfacet: contact\noperation: delete\ncolumns:\n  id: payload.id\n",
+        )
+        .unwrap(),
+    );
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), doc_uc());
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    routing.insert("UserEmailCleared".to_string(), vec!["sql-primary".into()]);
+    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    assert!(
+        r.to_string().contains("delete is default-facet only"),
+        "{r}"
+    );
+}
+
+#[test]
+fn phase15_rejects_facet_identity_that_differs_from_the_entity() {
+    let config = base_config();
+    config.validate().unwrap();
+    let mut sql = HashMap::new();
+    sql.insert("UserCreated".to_string(), sql_uc());
+    sql.insert(
+        "UserEmailChanged".to_string(),
+        serde_yaml::from_str::<SqlMapping>(
+            "event: UserEmailChanged\ntable: users\nprimary_key: email\nversion: 1\nfacet: contact\ncolumns:\n  email: payload.email\n  note: payload.note\n",
+        )
+        .unwrap(),
+    );
+    let mut doc = HashMap::new();
+    doc.insert("UserCreated".to_string(), doc_uc());
+    let mut routing = HashMap::new();
+    routing.insert(
+        "UserCreated".to_string(),
+        vec!["sql-primary".into(), "doc-readmodel".into()],
+    );
+    routing.insert("UserEmailChanged".to_string(), vec!["sql-primary".into()]);
+    let r = validate_projection_config(&config, &routing, &sql, &doc, &HashMap::new()).unwrap_err();
+    assert!(
+        r.to_string()
+            .contains("differs from the entity's primary key"),
+        "{r}"
+    );
+}
