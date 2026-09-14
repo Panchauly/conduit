@@ -32,8 +32,17 @@ const GUARD_COLLECTION: &str = "conduit_projection_state";
 /// (Phase 23.3) — the same shape as Phase 22.3's Redis retry loop.
 const MAX_ATTEMPTS: u32 = 5;
 
+/// Any Mongo error from inside the transaction (a read, a write, or the
+/// final commit) that carries a retryable label becomes `WriteConflict`
+/// rather than a hard failure — a write conflict most often surfaces from
+/// the individual operation that lost the race, not only from
+/// `commit_transaction()`.
 fn mongo_err(e: mongodb::error::Error) -> DocumentError {
-    DocumentError::WriteFailed(e.to_string())
+    if is_retryable(&e) {
+        DocumentError::WriteConflict
+    } else {
+        DocumentError::WriteFailed(e.to_string())
+    }
 }
 
 /// A MongoDB transaction error that means "a concurrent writer touched the
@@ -228,7 +237,6 @@ impl StorageAdapter for MongoDbAdapter {
             let attempt_result = match outcome {
                 Ok(o) => match session.commit_transaction().run() {
                     Ok(()) => Ok(o),
-                    Err(e) if is_retryable(&e) => Err(DocumentError::WriteConflict),
                     Err(e) => Err(mongo_err(e)),
                 },
                 Err(e) => {
