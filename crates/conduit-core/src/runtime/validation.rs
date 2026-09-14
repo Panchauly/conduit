@@ -41,6 +41,11 @@ pub enum ValidationIssue {
         adapter_id: String,
         reason: String,
     },
+    /// Phase 22.4: a Redis adapter's connection config is unusable.
+    InvalidRedisConfig {
+        adapter_id: String,
+        reason: String,
+    },
     UnknownAdapter {
         event_type: String,
         adapter_id: String,
@@ -182,6 +187,13 @@ impl fmt::Display for ValidationIssue {
                 write!(
                     f,
                     "invalid postgres adapter {:?} config: {}",
+                    adapter_id, reason
+                )
+            }
+            ValidationIssue::InvalidRedisConfig { adapter_id, reason } => {
+                write!(
+                    f,
+                    "invalid redis adapter {:?} config: {}",
                     adapter_id, reason
                 )
             }
@@ -477,8 +489,10 @@ fn is_file(a: &AdapterConfig) -> bool {
     matches!(a, AdapterConfig::File(_))
 }
 
+/// Any key-value backend (Phase 22) — the file-backed store or Redis. Both
+/// consume `KvMapping`s and share the mapping-coverage / capability rules.
 fn is_keyvalue(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::KeyValue(_))
+    matches!(a, AdapterConfig::KeyValue(_) | AdapterConfig::Redis(_))
 }
 
 fn is_graph(a: &AdapterConfig) -> bool {
@@ -751,6 +765,25 @@ pub fn validate_projection_config(
                 });
             } else if url.parse::<::postgres::Config>().is_err() {
                 report.push(ValidationIssue::InvalidPostgresConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: format!("`url` does not parse: {url}"),
+                });
+            }
+        }
+    }
+
+    // Phase 22.4: a Redis adapter's `url` must be non-empty and parse.
+    // `redis::Client::open` validates scheme/host without connecting.
+    for a in &config.adapters {
+        if let AdapterConfig::Redis(cfg) = a {
+            let url = crate::runtime::config::expand_env(&cfg.config.url);
+            if url.trim().is_empty() {
+                report.push(ValidationIssue::InvalidRedisConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: "`url` is empty".into(),
+                });
+            } else if ::redis::Client::open(url.as_str()).is_err() {
+                report.push(ValidationIssue::InvalidRedisConfig {
                     adapter_id: cfg.id.clone(),
                     reason: format!("`url` does not parse: {url}"),
                 });

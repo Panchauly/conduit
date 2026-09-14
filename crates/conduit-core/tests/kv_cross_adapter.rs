@@ -10,7 +10,7 @@ use conduit_core::adapter::document::mapping::DocumentMapping;
 use conduit_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use conduit_core::adapter::keyvalue::mapping::KvMapping;
 use conduit_core::adapter::keyvalue::runtime::KvRuntimeBuilder;
-use conduit_core::adapter::keyvalue::store::KeyValueStore;
+use conduit_core::adapter::keyvalue::store::FileKvStore;
 use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use conduit_core::adapter::sql::sqlite::SqliteAdapter;
@@ -171,7 +171,7 @@ value: {}
 "#,
         )?,
     );
-    let kv_store = KeyValueStore::new(
+    let kv_store = FileKvStore::new(
         "kv-cache".to_string(),
         kv_root.clone(),
         30,

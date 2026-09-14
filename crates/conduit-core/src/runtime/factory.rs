@@ -9,8 +9,9 @@ use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::graph::runtime::GraphRuntimeBuilder;
 use crate::adapter::graph::store::GraphStore;
 use crate::adapter::keyvalue::mapping::KvMapping;
+use crate::adapter::keyvalue::redis::RedisAdapter;
 use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
-use crate::adapter::keyvalue::store::KeyValueStore;
+use crate::adapter::keyvalue::store::FileKvStore;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::adapter::sql::postgres::PostgresAdapter;
 use crate::adapter::sql::runtime::SqlRuntimeBuilder;
@@ -65,7 +66,7 @@ pub fn build_adapters_from_config(
 
             AdapterConfig::KeyValue(cfg) => {
                 let builder = KvRuntimeBuilder::new(kv_mappings.clone());
-                adapters.push(Box::new(KeyValueStore::new(
+                adapters.push(Box::new(FileKvStore::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
                     cfg.priority,
@@ -91,6 +92,20 @@ pub fn build_adapters_from_config(
                 let builder = SqlRuntimeBuilder::new(sql_mappings.clone());
                 let url = crate::runtime::config::expand_env(&cfg.config.url);
                 adapters.push(Box::new(PostgresAdapter::new(
+                    cfg.id.clone(),
+                    &url,
+                    cfg.config.pool_size.unwrap_or(4),
+                    cfg.priority,
+                    builder,
+                    Arc::clone(&upcasters),
+                    config.migration_policy,
+                )));
+            }
+
+            AdapterConfig::Redis(cfg) => {
+                let builder = KvRuntimeBuilder::new(kv_mappings.clone());
+                let url = crate::runtime::config::expand_env(&cfg.config.url);
+                adapters.push(Box::new(RedisAdapter::new(
                     cfg.id.clone(),
                     &url,
                     cfg.config.pool_size.unwrap_or(4),

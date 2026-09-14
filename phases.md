@@ -33,18 +33,20 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 19 | Postgres SQL Backend (19.1–19.6) | ✅ Completed | [phases/phase-19-postgres-sql-backend.md](phases/phase-19-postgres-sql-backend.md) |
 | 20 | gRPC Ingestion Service (20.1–20.5) | ✅ Completed | [phases/phase-20-grpc-ingestion.md](phases/phase-20-grpc-ingestion.md) |
 | 21 | OSS Release Readiness (21.1–21.6) | ✅ Completed | [phases/phase-21-oss-release-readiness.md](phases/phase-21-oss-release-readiness.md) |
+| 22 | Redis Key-Value Backend (22.1–22.5) | ✅ Completed | [phases/phase-22-redis-kv-backend.md](phases/phase-22-redis-kv-backend.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md) · Engine/producer boundary: [phases/producer-contract.md](phases/producer-contract.md)
 
 ---
 
-## Beyond Phase 21
+## Beyond Phase 22
 
-All four storage kinds from the project pitch exist (Phases 11–16, file-backed, one `decide()` core), the symmetric source side exists (Phase 17), the debt from that run is paid down (Phase 18), the SQL sink is production-real on Postgres (Phase 19), the technology-agnostic producer contract is defined (Phase 20), and the repo is licensed, CI-gated, documented, and example-driven for a stranger to pick up (Phase 21). Conduit is **projection-only** and structured in three parts with distinct dependency rules ([`architecture.md` §1.1–1.4](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
+All four storage kinds from the project pitch exist (Phases 11–16, file-backed, one `decide()` core), the symmetric source side exists (Phase 17), the debt from that run is paid down (Phase 18), the SQL sink is production-real on Postgres (Phase 19), the technology-agnostic producer contract is defined (Phase 20), the repo is licensed, CI-gated, documented, and example-driven for a stranger to pick up (Phase 21), and the key-value sink now has a real backend on Redis, behind the same `decide()`/guard model (Phase 22). Conduit is **projection-only** and structured in three parts with distinct dependency rules ([`architecture.md` §1.1–1.4](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
 
 Candidate future work, not yet planned in detail:
 
-- **Later OSS backends** — a Redis key-value backend and a Neo4j/Cypher graph backend (each adapter is otherwise single-implementation, like the file-backed default).
+- **Later OSS backends** — a Neo4j/Cypher graph backend and a MongoDB document backend (each adapter is otherwise single-implementation, like the file-backed default).
 - **Pro modules** — native Kafka / Kinesis `EventSource` implementations, a distributed multi-node coordinator, compliance/audit encryption adapters, a visual `conduit explain` topology UI ([`architecture.md` §1.4](architecture.md)).
-- **`conduit-core` dependency weight** — Phase 19 (`postgres`/`tokio`) and Phase 20 (nothing, `tonic` is isolated in `conduit-ingest`) mean the embeddable crate now pulls `tokio` transitively via `postgres`; a feature gate to drop the Postgres backend for lean embedded use is open.
+- **`conduit-core` dependency weight** — Phase 19 (`postgres`/`tokio`), Phase 20 (nothing, `tonic` is isolated in `conduit-ingest`), and Phase 22 (`redis`, a sync client like `postgres`, no new transitive runtime) mean the embeddable crate now pulls in multiple drivers transitively; a feature gate to drop unused backends for lean embedded use is open.
 - **Subgraph-per-event** — one mapping emitting several graph records atomically (deferred out of Phase 16).
+- **TTL for the KV adapters** — deferred out of Phase 14/22 for replay-determinism reasons (time-based eviction isn't reproducible from a replayed log).
