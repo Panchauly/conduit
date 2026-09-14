@@ -203,8 +203,10 @@ impl EventSource for GrpcSource {
 pub struct GrpcServer {
     runtime: tokio::runtime::Runtime,
     shutdown: watch::Sender<bool>,
-    /// The actually-bound address (useful when a `:0` ephemeral port was asked for).
+    /// Set for a `tcp://` listener (useful when a `:0` ephemeral port was asked for).
     pub local_addr: Option<SocketAddr>,
+    /// Set for a `unix:` listener (Phase 21.6, unix targets only).
+    pub local_path: Option<std::path::PathBuf>,
 }
 
 impl GrpcServer {
@@ -216,16 +218,25 @@ impl GrpcServer {
     }
 }
 
+/// Where a bound listener ended up — a `SocketAddr` for `tcp://`, a path for
+/// `unix:` (Phase 21.6).
+enum Bound {
+    Tcp(SocketAddr),
+    #[cfg(unix)]
+    Unix(std::path::PathBuf),
+}
+
 /// Bind a gRPC ingestion server and return it together with the [`GrpcSource`]
 /// to feed `conduit_core::run_sources`.
 ///
-/// `listen` accepts `"tcp://host:port"`, a bare `"host:port"`, or (unix only)
-/// `"unix:/path/to.sock"`.
+/// `listen` accepts `"tcp://host:port"`, a bare `"host:port"`, or (Linux/macOS
+/// only) `"unix:/path/to.sock"` — on Windows a `unix:` target returns a clear
+/// config error.
 pub fn start(
     source_id: impl Into<String>,
     listen: &str,
 ) -> Result<(GrpcServer, GrpcSource), IngestError> {
-    let addr = parse_tcp(listen)?;
+    let target = parse_listen(listen)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -233,38 +244,76 @@ pub fn start(
 
     let (ev_tx, ev_rx) = mpsc::channel::<SourcedEvent>(CHANNEL_BOUND);
     let (ack_tx, _ack_rx0) = broadcast::channel::<AckMsg>(256);
-    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     // Bind inside the runtime task and report the actual address back — keeps
     // `start` free of `block_on`, so it is callable from any sync context.
-    let (addr_tx, addr_rx) = tokio::sync::oneshot::channel::<Result<SocketAddr, String>>();
+    let (addr_tx, addr_rx) = tokio::sync::oneshot::channel::<Result<Bound, String>>();
 
     let svc = IngestService {
         ev_tx,
         ack_tx: ack_tx.clone(),
     };
 
-    runtime.spawn(async move {
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                let _ = addr_tx.send(Err(e.to_string()));
-                return;
-            }
-        };
-        let local = listener.local_addr();
-        let _ = addr_tx.send(local.map_err(|e| e.to_string()));
-        let _ = Server::builder()
-            .add_service(pb::ingest_server::IngestServer::new(svc))
-            .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
-                let _ = shutdown_rx.wait_for(|v| *v).await;
-            })
-            .await;
-    });
+    match target {
+        Listen::Tcp(addr) => {
+            let mut shutdown_rx = shutdown_rx;
+            runtime.spawn(async move {
+                let listener = match tokio::net::TcpListener::bind(addr).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        let _ = addr_tx.send(Err(e.to_string()));
+                        return;
+                    }
+                };
+                let local = listener.local_addr();
+                let _ = addr_tx.send(local.map(Bound::Tcp).map_err(|e| e.to_string()));
+                let _ = Server::builder()
+                    .add_service(pb::ingest_server::IngestServer::new(svc))
+                    .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
+                        let _ = shutdown_rx.wait_for(|v| *v).await;
+                    })
+                    .await;
+            });
+        }
+        #[cfg(unix)]
+        Listen::Unix(path) => {
+            prepare_unix_socket_path(&path)?;
+            let mut shutdown_rx = shutdown_rx;
+            let bound_path = path.clone();
+            runtime.spawn(async move {
+                let listener = match tokio::net::UnixListener::bind(&path) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        let _ = addr_tx.send(Err(e.to_string()));
+                        return;
+                    }
+                };
+                let _ = addr_tx.send(Ok(Bound::Unix(bound_path.clone())));
+                let _ = Server::builder()
+                    .add_service(pb::ingest_server::IngestServer::new(svc))
+                    .serve_with_incoming_shutdown(
+                        tokio_stream::wrappers::UnixListenerStream::new(listener),
+                        async move {
+                            let _ = shutdown_rx.wait_for(|v| *v).await;
+                        },
+                    )
+                    .await;
+                // Best-effort cleanup: only after the server loop has actually
+                // stopped accepting, so a well-behaved shutdown leaves no stale file.
+                let _ = std::fs::remove_file(&bound_path);
+            });
+        }
+    }
 
-    let local_addr = addr_rx
+    let bound = addr_rx
         .blocking_recv()
         .map_err(|_| IngestError::Bind("server task exited before binding".into()))?
         .map_err(IngestError::Bind)?;
+    let (local_addr, local_path) = match bound {
+        Bound::Tcp(a) => (Some(a), None),
+        #[cfg(unix)]
+        Bound::Unix(p) => (None, Some(p)),
+    };
 
     let source = GrpcSource {
         id: source_id.into(),
@@ -277,10 +326,43 @@ pub fn start(
         GrpcServer {
             runtime,
             shutdown: shutdown_tx,
-            local_addr: Some(local_addr),
+            local_addr,
+            local_path,
         },
         source,
     ))
+}
+
+/// A stale socket file (nothing listening) is removed; a live one (something
+/// accepts connections on it) refuses to start (Phase 21.6).
+#[cfg(unix)]
+fn prepare_unix_socket_path(path: &std::path::Path) -> Result<(), IngestError> {
+    if path.exists() {
+        match std::os::unix::net::UnixStream::connect(path) {
+            Ok(_) => {
+                return Err(IngestError::Bind(format!(
+                    "{} is already in use by a running server",
+                    path.display()
+                )));
+            }
+            Err(_) => {
+                std::fs::remove_file(path).map_err(|e| {
+                    IngestError::Bind(format!("removing stale socket {}: {e}", path.display()))
+                })?;
+            }
+        }
+    }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            IngestError::Bind(format!(
+                "creating socket directory {}: {e}",
+                parent.display()
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +424,9 @@ pub fn serve(
 
     let (server, source) = start("grpc", &opts.listen).map_err(ServeError::Ingest)?;
     if let Some(a) = server.local_addr {
-        eprintln!("conduit ingest: listening on {a}");
+        eprintln!("conduit ingest: listening on tcp://{a}");
+    } else if let Some(p) = &server.local_path {
+        eprintln!("conduit ingest: listening on unix:{}", p.display());
     }
 
     let run_opts = conduit_core::SourceRunOptions {
@@ -370,16 +454,33 @@ pub fn serve(
     result.map_err(ServeError::Source)
 }
 
-/// `tcp://h:p`, `h:p`, or (unix) `unix:/path` — the last returns an error here
-/// pending `#[cfg(unix)]` UDS support; TCP is the portable default.
-fn parse_tcp(listen: &str) -> Result<SocketAddr, IngestError> {
-    let s = listen.strip_prefix("tcp://").unwrap_or(listen);
-    if s.starts_with("unix:") {
-        return Err(IngestError::Config(
-            "unix-domain-socket listener is not built on this platform; use tcp://host:port".into(),
-        ));
+/// A parsed `--listen` target (Phase 21.6 adds `Unix`).
+enum Listen {
+    Tcp(SocketAddr),
+    #[cfg(unix)]
+    Unix(std::path::PathBuf),
+}
+
+/// `tcp://h:p`, a bare `h:p`, or `unix:/path`. `unix:` is only ever a `Listen`
+/// target on Unix; elsewhere it is a clear config error, not a silent TCP fallback.
+fn parse_listen(listen: &str) -> Result<Listen, IngestError> {
+    if let Some(path) = listen.strip_prefix("unix:") {
+        #[cfg(unix)]
+        {
+            return Ok(Listen::Unix(std::path::PathBuf::from(path)));
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            return Err(IngestError::Config(
+                "unix-domain-socket listener is not built on this platform; use tcp://host:port"
+                    .into(),
+            ));
+        }
     }
+    let s = listen.strip_prefix("tcp://").unwrap_or(listen);
     s.parse()
+        .map(Listen::Tcp)
         .map_err(|e| IngestError::Config(format!("invalid listen address {listen:?}: {e}")))
 }
 
@@ -413,10 +514,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_tcp_forms() {
-        assert!(parse_tcp("tcp://127.0.0.1:50051").is_ok());
-        assert!(parse_tcp("127.0.0.1:0").is_ok());
-        assert!(parse_tcp("unix:/tmp/x.sock").is_err());
-        assert!(parse_tcp("not-an-addr").is_err());
+    fn parse_listen_forms() {
+        assert!(matches!(
+            parse_listen("tcp://127.0.0.1:50051"),
+            Ok(Listen::Tcp(_))
+        ));
+        assert!(matches!(parse_listen("127.0.0.1:0"), Ok(Listen::Tcp(_))));
+        assert!(parse_listen("not-an-addr").is_err());
+
+        #[cfg(unix)]
+        assert!(matches!(
+            parse_listen("unix:/tmp/x.sock"),
+            Ok(Listen::Unix(_))
+        ));
+        #[cfg(not(unix))]
+        assert!(parse_listen("unix:/tmp/x.sock").is_err());
     }
 }

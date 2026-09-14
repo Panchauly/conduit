@@ -10,13 +10,13 @@ fn main() {
         );
     }
 
-    let root: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("workspace root")
-        .to_path_buf();
-    let proto = root.join("proto/conduit/v1/ingest.proto");
-    let include = root.join("proto");
+    // Use this crate's own copy (`proto/`), not the workspace-root one — a
+    // `cargo publish`'d package can only see files inside its own directory
+    // (Phase 21.1). The two copies are kept in sync by hand; see the comment
+    // atop `proto/conduit/v1/ingest.proto` at the workspace root.
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let proto = manifest_dir.join("proto/conduit/v1/ingest.proto");
+    let include = manifest_dir.join("proto");
 
     println!("cargo:rerun-if-changed={}", proto.display());
 
