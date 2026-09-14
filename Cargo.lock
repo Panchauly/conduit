@@ -326,7 +326,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "conduit-cli"
-version = "0.5.0-alpha"
+version = "0.7.0"
 dependencies = [
  "clap",
  "conduit-core",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-client"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "prost",
  "protoc-bin-vendored",
@@ -349,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-core"
-version = "0.5.0-alpha"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "once_cell",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-ingest"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "conduit-client",
  "conduit-core",

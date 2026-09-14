@@ -9,13 +9,11 @@ fn main() {
         );
     }
 
-    let root: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("workspace root")
-        .to_path_buf();
-    let proto = root.join("proto/conduit/v1/ingest.proto");
-    let include = root.join("proto");
+    // Use this crate's own copy (`proto/`) — see the note in
+    // `conduit-ingest/build.rs` and atop the workspace-root `.proto` file.
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let proto = manifest_dir.join("proto/conduit/v1/ingest.proto");
+    let include = manifest_dir.join("proto");
 
     println!("cargo:rerun-if-changed={}", proto.display());
 

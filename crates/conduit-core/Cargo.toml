@@ -1,7 +1,15 @@
 [package]
 name = "conduit-core"
-version = "0.5.0-alpha"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Deterministic event projection engine for CQRS/event-sourcing read models."
+keywords = ["cqrs", "event-sourcing", "projection", "cdc"]
+categories = ["database"]
+readme = "README.md"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

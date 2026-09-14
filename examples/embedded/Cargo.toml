@@ -1,0 +1,10 @@
+[package]
+name = "conduit-embedded-example"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+conduit-core = { path = "../../crates/conduit-core" }
+serde_yaml = "0.9"
+rusqlite = { version = "0.32", features = ["bundled"] }

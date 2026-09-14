@@ -1,7 +1,16 @@
 [package]
 name = "conduit-client"
-version = "0.6.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Reference Rust producer client for Conduit's gRPC ingestion contract (conduit/v1)."
+keywords = ["cqrs", "event-sourcing", "grpc", "producer"]
+categories = ["database", "network-programming"]
+readme = "README.md"
+include = ["src/**", "build.rs", "README.md", "proto/**"]
 
 [dependencies]
 tonic = "0.12"

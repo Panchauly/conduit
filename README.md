@@ -1,72 +1,92 @@
 # Conduit
 
-**Conduit** is an event-first projection engine that deterministically projects events into multiple storage models using explicit, schema-driven mappings.
+[![CI](https://github.com/Panchauly/conduit/actions/workflows/ci.yml/badge.svg)](https://github.com/Panchauly/conduit/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#status)
 
-It is designed for backend systems where the **same event must be safely and consistently projected into different stores** — SQL, document, key-value, and graph adapters all exist (file-backed) — without duplication of logic or hidden behavior. Conduit is **projection-only**: it consumes an event log it does not own and does not produce, buffer, or store events (see [`architecture.md` §1.1](architecture.md)).
+**Conduit** deterministically projects events into SQL, document, key-value, and graph
+stores using explicit, schema-driven mappings. It is **projection-only**: it consumes an
+event log it does not own and never produces, buffers, or stores events itself (see
+[`architecture.md` §1.1](architecture.md)).
 
----
+## Quickstart
 
-## Why Conduit Exists
+```sh
+git clone https://github.com/Panchauly/conduit.git
+cd conduit
+bash examples/sqlite-quickstart/run.sh
+```
 
-In many systems, a single event needs to be written to:
-- a SQL database (transactions)
-- a document store (read models)
-- a key-value store / cache (fast access)
-- a graph (relationships)
+That's it — three events go in, a projected SQLite table comes out:
 
-This logic is often:
-- duplicated across services
-- inconsistently implemented
-- difficult to validate
-- hard to reason about when failures occur
+```
+OK — app.db.users matches expected/users.txt:
+u1|Ada|ada.lovelace@example.com
+u2|Grace|grace@example.com
+```
 
-Conduit centralizes this responsibility with **deterministic routing**, **explicit mappings**, and **strict validation**.
+What just ran, unpacked (all under [`examples/sqlite-quickstart/`](examples/sqlite-quickstart/)):
 
----
+```sh
+conduit run --config config.yaml --mappings mappings --once
+```
 
-## Core Principles
+- **`config.yaml`** points at a `sqlite` adapter and a `directory` event source.
+- **`mappings/sql/user_registered.yaml`** and **`user_email_changed.yaml`** map
+  `event_type` → SQL columns, one file per event type.
+- **`routing.json`** says which adapters each event type reaches.
+- **`events/events.ndjson`** is the input — three NDJSON events.
 
-- **Event-first** — routing is based on event type, not metadata heuristics
-- **Deterministic** — no implicit behavior, no magic
-- **Schema-explicit** — mappings are declared, not inferred
-- **Fail fast** — configuration errors are caught at startup
-- **Storage-agnostic** — adapters define *how*, not *what*
+Same event, three other storage kinds, one call each: `examples/postgres/` (a real
+transactional Postgres backend), `examples/embedded/` (call `conduit-core` as a library,
+no CLI), `examples/grpc-producer/` (stream events into a long-lived `conduit ingest`
+service instead of reading a file).
 
----
+## Why Conduit exists
 
-## What Conduit Is
+A single event often needs to reach a SQL table (transactions), a document store (read
+models), a key-value store (fast lookups), and a graph (relationships) — and that
+fan-out logic tends to get duplicated across services, implemented inconsistently, and
+be hard to reason about when something fails. Conduit centralizes it with deterministic
+routing, explicit mappings, and a startup-time validation pass, so a redelivered or
+out-of-order event is a clean, explainable skip rather than a duplicate write.
 
-- A **projection engine** for event-driven systems
-- A **library + CLI** (service optional later)
-- A tool for **backend / infrastructure engineers**
-- A foundation for multi-model data architectures (CQRS, event sourcing)
+## Core principles
 
----
+- **Event-first** — routing is by `event_type`, never content or metadata heuristics.
+- **Deterministic** — no implicit behavior; the same event log always produces the same
+  projected state.
+- **Schema-explicit** — mappings are declared YAML, not inferred from payloads.
+- **Fail fast** — bad config, unroutable events, and missing adapter capabilities are
+  caught at startup, not mid-run.
+- **Storage-agnostic** — adapters define *how* to write; mappings define *what*.
 
-## What Conduit Is NOT
+## What Conduit is not
 
-- ❌ Not a streaming platform (Kafka alternative)
-- ❌ Not an ETL / ELT tool
-- ❌ Not a workflow engine
-- ❌ Not a database
-- ❌ Not a schema inference system
+Not a streaming platform (no Kafka-alternative ambitions), not an ETL/ELT tool, not a
+workflow engine, not a database, not a schema-inference system. It prefers explicitness
+over convenience throughout.
 
-Conduit prefers **explicitness over convenience**.
+## Learn more
 
----
+- [`docs/concepts.md`](docs/concepts.md) — the mental model: the event envelope,
+  `sequence` vs `position`, the guard, facets, `decide()`.
+- [`docs/mapping-reference.md`](docs/mapping-reference.md) — every mapping field, per
+  storage kind, with examples.
+- [`architecture.md`](architecture.md) — the three-part structure (engine / sources /
+  adapters), dependency rules, and open-source vs. product scope.
+- [`phases.md`](phases.md) — the phase-by-phase build history.
+- [`phases/producer-contract.md`](phases/producer-contract.md) — the ordering/delivery
+  assumptions a producer must satisfy.
+- [`proto/README.md`](proto/README.md) — write a non-Rust producer against the gRPC
+  ingestion contract.
 
-## High-Level Architecture
+## Status
 
-See [`architecture.md`](architecture.md) for the full contract, [`phases.md`](phases.md) for the phase-by-phase evolution, and [`phases/producer-contract.md`](phases/producer-contract.md) for the assumptions Conduit depends on but cannot verify.
+Latest release notes: **[`RELEASES/v0.7.0.md`](RELEASES/v0.7.0.md)**.
 
-`event → route (by event_type) → adapters (in dependency order) → decide() gate → storage`
+Conduit is in an **alpha** phase — core architecture and execution semantics are stable,
+but public APIs may still evolve. Intended for early feedback, not production
+deployment.
 
----
-
-## Version Status
-
-Latest release notes: **[`RELEASES/v0.6.0.md`](RELEASES/v0.6.0.md)** (Phases 11–17).
-
-Conduit is in an **alpha** phase. Core architecture and execution semantics are stable, but public APIs may evolve.
-
-This release is intended for early feedback, not production deployment.
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your
+option.
