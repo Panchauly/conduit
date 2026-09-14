@@ -37,10 +37,11 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace
-        # No CONDUIT_PG_URL / CONDUIT_REDIS_URL / Docker here — the Phase 19.6
-        # `pg_backend` and Phase 22.5 `redis_backend` suites, and the Phase
-        # 21.6 `#[cfg(unix)]` UDS test, skip or don't compile (Windows)
-        # accordingly. See `test-postgres` / `test-redis` for the former two.
+        # No CONDUIT_PG_URL / CONDUIT_REDIS_URL / CONDUIT_MONGO_URL / Docker
+        # here — the Phase 19.6 `pg_backend`, Phase 22.5 `redis_backend`, and
+        # Phase 23.5 `mongo_backend` suites, and the Phase 21.6 `#[cfg(unix)]`
+        # UDS test, skip or don't compile (Windows) accordingly. See
+        # `test-postgres` / `test-redis` / `test-mongo` for the first three.
 
   test-postgres:
     name: test (postgres)
@@ -92,6 +93,36 @@ jobs:
         run: cargo test -p conduit-core --test redis_backend
         env:
           CONDUIT_REDIS_URL: redis://localhost:6379
+
+  test-mongo:
+    name: test (mongodb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Phase 23.3's transactions need a replica set — a standalone `mongod`
+      # can't run them. `services:` has no way to override a container's
+      # command (only `docker create` flags like health checks), so `--replSet`
+      # needs a plain `docker run` instead of the services: block.
+      - name: start a single-node MongoDB replica set
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:7 --replSet rs0
+          for i in $(seq 1 30); do
+            docker exec mongo mongosh --quiet --eval 'db.adminCommand({ping:1})' && break
+            sleep 1
+          done
+          docker exec mongo mongosh --quiet --eval 'rs.initiate()'
+          for i in $(seq 1 30); do
+            state=$(docker exec mongo mongosh --quiet --eval 'rs.status().myState' 2>/dev/null)
+            [ "$state" = "1" ] && break
+            sleep 1
+          done
+      - name: cargo test -p conduit-core --test mongo_backend
+        run: cargo test -p conduit-core --test mongo_backend
+        env:
+          CONDUIT_MONGO_URL: mongodb://localhost:27017/?directConnection=true
+          CONDUIT_MONGO_DB: conduit_ci
 
   msrv:
     name: MSRV (1.88)

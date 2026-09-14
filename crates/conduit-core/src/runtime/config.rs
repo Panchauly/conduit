@@ -171,6 +171,9 @@ pub enum AdapterConfig {
 
     #[serde(rename = "redis")]
     Redis(RedisAdapterConfig),
+
+    #[serde(rename = "mongodb")]
+    MongoDb(MongoDbAdapterConfig),
 }
 
 #[derive(Debug, Deserialize)]
@@ -296,6 +299,31 @@ pub struct RedisConfig {
     /// of the committed config.
     pub url: String,
     /// r2d2 pool size (default 4).
+    #[serde(default)]
+    pub pool_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MongoDbAdapterConfig {
+    pub id: String,
+    pub priority: u32,
+    pub config: MongoDbConfig,
+
+    #[serde(default)]
+    pub capabilities: Option<AdapterCapabilities>,
+
+    #[serde(default)]
+    pub depends_on: Vec<AdapterId>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MongoDbConfig {
+    /// `mongodb://[user:pass@]host[:port][/?options]`. May contain
+    /// `${ENV_VAR}` references (Phase 19.2 pattern, reused as-is).
+    pub url: String,
+    pub database: String,
+    /// `maxPoolSize` connection-string parameter (default 4) — MongoDB's
+    /// `Client` is internally pooled, so this isn't a separate r2d2 pool.
     #[serde(default)]
     pub pool_size: Option<u32>,
 }
@@ -431,6 +459,7 @@ impl AdapterConfig {
             AdapterConfig::Graph(cfg) => &cfg.id,
             AdapterConfig::Postgres(cfg) => &cfg.id,
             AdapterConfig::Redis(cfg) => &cfg.id,
+            AdapterConfig::MongoDb(cfg) => &cfg.id,
         }
     }
 
@@ -442,6 +471,7 @@ impl AdapterConfig {
             AdapterConfig::Graph(cfg) => cfg.priority,
             AdapterConfig::Postgres(cfg) => cfg.priority,
             AdapterConfig::Redis(cfg) => cfg.priority,
+            AdapterConfig::MongoDb(cfg) => cfg.priority,
         }
     }
 
@@ -454,6 +484,7 @@ impl AdapterConfig {
             AdapterConfig::Graph(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Postgres(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Redis(cfg) => cfg.capabilities.as_deref(),
+            AdapterConfig::MongoDb(cfg) => cfg.capabilities.as_deref(),
         }
     }
 
@@ -465,6 +496,7 @@ impl AdapterConfig {
             AdapterConfig::Graph(cfg) => &cfg.depends_on,
             AdapterConfig::Postgres(cfg) => &cfg.depends_on,
             AdapterConfig::Redis(cfg) => &cfg.depends_on,
+            AdapterConfig::MongoDb(cfg) => &cfg.depends_on,
         }
     }
 }

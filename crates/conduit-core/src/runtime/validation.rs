@@ -46,6 +46,11 @@ pub enum ValidationIssue {
         adapter_id: String,
         reason: String,
     },
+    /// Phase 23.4: a MongoDB adapter's connection config is unusable.
+    InvalidMongoDbConfig {
+        adapter_id: String,
+        reason: String,
+    },
     UnknownAdapter {
         event_type: String,
         adapter_id: String,
@@ -194,6 +199,13 @@ impl fmt::Display for ValidationIssue {
                 write!(
                     f,
                     "invalid redis adapter {:?} config: {}",
+                    adapter_id, reason
+                )
+            }
+            ValidationIssue::InvalidMongoDbConfig { adapter_id, reason } => {
+                write!(
+                    f,
+                    "invalid mongodb adapter {:?} config: {}",
                     adapter_id, reason
                 )
             }
@@ -485,8 +497,12 @@ fn is_sql(a: &AdapterConfig) -> bool {
     matches!(a, AdapterConfig::Sqlite(_) | AdapterConfig::Postgres(_))
 }
 
-fn is_file(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::File(_))
+/// Any document backend (Phase 23) — the file-backed store or MongoDB. Both
+/// consume `DocumentMapping`s and share the mapping-coverage / capability
+/// rules, mirroring `is_sql` (SQLite + Postgres) and `is_keyvalue`
+/// (file-backed + Redis).
+fn is_document(a: &AdapterConfig) -> bool {
+    matches!(a, AdapterConfig::File(_) | AdapterConfig::MongoDb(_))
 }
 
 /// Any key-value backend (Phase 22) — the file-backed store or Redis. Both
@@ -784,6 +800,37 @@ pub fn validate_projection_config(
                 });
             } else if ::redis::Client::open(url.as_str()).is_err() {
                 report.push(ValidationIssue::InvalidRedisConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: format!("`url` does not parse: {url}"),
+                });
+            }
+        }
+    }
+
+    // Phase 23.4: a MongoDB adapter's `url` and `database` must be
+    // non-empty and `url` must parse. `Client::with_uri_str` validates
+    // scheme/host without connecting (no handshake at construction).
+    //
+    // The doc's live replica-set connectivity warning is deliberately not
+    // implemented here — see phase-23's "As built" notes: it would require a
+    // non-fatal warning channel this module has never had (every issue here
+    // is fatal by construction), contradicting this same sub-phase's own
+    // "no new validation mechanism" guarantee.
+    for a in &config.adapters {
+        if let AdapterConfig::MongoDb(cfg) = a {
+            let url = crate::runtime::config::expand_env(&cfg.config.url);
+            if url.trim().is_empty() {
+                report.push(ValidationIssue::InvalidMongoDbConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: "`url` is empty".into(),
+                });
+            } else if cfg.config.database.trim().is_empty() {
+                report.push(ValidationIssue::InvalidMongoDbConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: "`database` is empty".into(),
+                });
+            } else if ::mongodb::sync::Client::with_uri_str(&url).is_err() {
+                report.push(ValidationIssue::InvalidMongoDbConfig {
                     adapter_id: cfg.id.clone(),
                     reason: format!("`url` does not parse: {url}"),
                 });
@@ -1135,7 +1182,7 @@ pub fn validate_projection_config(
                         missing,
                     });
                 }
-            } else if is_file(ac) {
+            } else if is_document(ac) {
                 let Some(doc_map) = doc.get(event_type) else {
                     report.push(ValidationIssue::MissingDocumentMapping {
                         event_type: event_type.clone(),
@@ -1233,14 +1280,14 @@ pub fn validate_projection_config(
             });
             continue;
         };
-        let has_file = ids.iter().any(|id| {
+        let has_document_target = ids.iter().any(|id| {
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(is_file)
+                .map(is_document)
                 .unwrap_or(false)
         });
-        if !has_file {
+        if !has_document_target {
             report.push(ValidationIssue::DocumentMappingNoFileTarget {
                 event: event.clone(),
             });
