@@ -296,6 +296,23 @@ impl MongoBackend<'_> {
     fn target_collection(&self, name: &str) -> mongodb::sync::Collection<Document> {
         self.db.collection(name)
     }
+
+    /// The guard's BSON form, with `target`/`entity_key` added — `ProjectionGuard`
+    /// itself carries neither (they're the caller's identity, not guard state),
+    /// but `replace_one` overwrites the whole document with exactly what it's
+    /// given, so they must be in the replacement or a second write collides
+    /// with every other entity on the unique index (both fields absent = null).
+    fn guard_doc(
+        collection: &str,
+        entity_id: &str,
+        guard: &ProjectionGuard,
+    ) -> Result<Document, DocumentError> {
+        let mut doc = to_document(guard)
+            .map_err(|e| DocumentError::WriteFailed(format!("failed to serialize guard: {e}")))?;
+        doc.insert("target", collection);
+        doc.insert("entity_key", entity_id);
+        Ok(doc)
+    }
 }
 
 impl DocumentBackend for MongoBackend<'_> {
@@ -357,8 +374,7 @@ impl DocumentBackend for MongoBackend<'_> {
             }
         }
 
-        let guard_doc = to_document(guard)
-            .map_err(|e| DocumentError::WriteFailed(format!("failed to serialize guard: {e}")))?;
+        let guard_doc = Self::guard_doc(collection, entity_id, guard)?;
         self.guard_collection()
             .replace_one(
                 doc! { "target": collection, "entity_key": entity_id },
@@ -383,8 +399,7 @@ impl DocumentBackend for MongoBackend<'_> {
             .run()
             .map_err(mongo_err)?;
 
-        let guard_doc = to_document(guard)
-            .map_err(|e| DocumentError::WriteFailed(format!("failed to serialize guard: {e}")))?;
+        let guard_doc = Self::guard_doc(collection, entity_id, guard)?;
         self.guard_collection()
             .replace_one(
                 doc! { "target": collection, "entity_key": entity_id },
