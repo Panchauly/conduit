@@ -37,9 +37,10 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace
-        # No CONDUIT_PG_URL / Docker here — the Phase 19.6 `pg_backend` suite
-        # and the Phase 21.6 `#[cfg(unix)]` UDS test skip or don't compile
-        # (Windows) accordingly. See the `test-postgres` job for the former.
+        # No CONDUIT_PG_URL / CONDUIT_REDIS_URL / Docker here — the Phase 19.6
+        # `pg_backend` and Phase 22.5 `redis_backend` suites, and the Phase
+        # 21.6 `#[cfg(unix)]` UDS test, skip or don't compile (Windows)
+        # accordingly. See `test-postgres` / `test-redis` for the former two.
 
   test-postgres:
     name: test (postgres)
@@ -69,6 +70,28 @@ jobs:
         run: bash examples/postgres/run.sh
         env:
           DATABASE_URL: postgres://postgres:conduit@localhost:5432/conduit_ci
+
+  test-redis:
+    name: test (redis)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p conduit-core --test redis_backend
+        run: cargo test -p conduit-core --test redis_backend
+        env:
+          CONDUIT_REDIS_URL: redis://localhost:6379
 
   msrv:
     name: MSRV (1.88)

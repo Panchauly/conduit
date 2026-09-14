@@ -14,6 +14,12 @@ pub enum KvError {
     /// Failed to write the value/guard to storage
     WriteFailed(String),
 
+    /// Phase 22.3: a backend's optimistic transaction (Redis WATCH/MULTI/EXEC)
+    /// was aborted by a concurrent writer. Retryable — the caller re-runs
+    /// [`super::exec::project`] from scratch against a freshly re-read guard,
+    /// not returned as a hard failure.
+    WriteConflict,
+
     /// No upcaster chain from the event's version to the mapping's target version.
     UnsupportedVersion {
         event_type: String,
@@ -34,6 +40,9 @@ impl fmt::Display for KvError {
             }
             KvError::WriteFailed(msg) => {
                 write!(f, "key-value write failed: {}", msg)
+            }
+            KvError::WriteConflict => {
+                write!(f, "key-value write conflict: guard changed concurrently")
             }
             KvError::UnsupportedVersion {
                 event_type,

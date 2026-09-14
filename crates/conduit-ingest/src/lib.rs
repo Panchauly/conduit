@@ -10,6 +10,7 @@
 //! `conduit_core::source::EventSource` trait, so `conduit_core::run_sources`
 //! drives it exactly like a `directory` source.
 
+#[allow(clippy::result_large_err)] // tonic-generated client stubs return `Err(tonic::Status)` directly
 pub mod pb {
     tonic::include_proto!("conduit.v1");
 }

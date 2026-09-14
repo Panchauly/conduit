@@ -101,9 +101,13 @@ document:
 
 ## Key-value (`mappings/keyvalue/*.yaml`)
 
+The identical mapping file routes to either KV backend — `keyvalue` (file-backed)
+or `redis` (Phase 22) — chosen by which adapter `routing.json` points the event
+type at. Nothing in the mapping itself names a backend.
+
 | field | required | meaning |
 |---|---|---|
-| `namespace` | yes | keyspace segment — the KV analog of a SQL `table` / document `collection`. |
+| `namespace` | yes | keyspace segment — the KV analog of a SQL `table` / document `collection`. On Redis this is the value key's prefix (`{namespace}:{key}`); the guard lives at `__conduit:guard:{namespace}:{key}`. |
 | `key` | yes | path expression resolving the entity's identity. |
 | `value` | yes for `upsert` | a JSON-like template, same leaf-path rules as `document`. Empty for `operation: delete`. |
 

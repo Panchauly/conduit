@@ -27,3 +27,8 @@ postgres = { version = "0.19", features = ["with-chrono-0_4"] }
 r2d2 = "0.8"
 r2d2_postgres = "0.18"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Phase 22: Redis key-value backend. Sync `redis` client; its own `r2d2`
+# feature implements `r2d2::ManageConnection` directly on `redis::Client` —
+# no separate r2d2-redis crate needed.
+redis = { version = "1", features = ["r2d2"] }

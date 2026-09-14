@@ -4,7 +4,7 @@
 use conduit_core::adapter::StorageAdapter;
 use conduit_core::adapter::keyvalue::mapping::KvMapping;
 use conduit_core::adapter::keyvalue::runtime::KvRuntimeBuilder;
-use conduit_core::adapter::keyvalue::store::KeyValueStore;
+use conduit_core::adapter::keyvalue::store::FileKvStore;
 use conduit_core::event::Event;
 use conduit_core::runtime::config::MigrationPolicy;
 use conduit_core::upcast::UpcasterRegistry;
@@ -71,7 +71,7 @@ value: {}
 fn kv_full_lifecycle_ends_absent_with_tombstone() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempdir()?;
 
-    let store = KeyValueStore::new(
+    let store = FileKvStore::new(
         "kv-cache".to_string(),
         dir.path().to_path_buf(),
         10,

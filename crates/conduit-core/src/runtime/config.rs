@@ -168,6 +168,9 @@ pub enum AdapterConfig {
 
     #[serde(rename = "postgres")]
     Postgres(PostgresAdapterConfig),
+
+    #[serde(rename = "redis")]
+    Redis(RedisAdapterConfig),
 }
 
 #[derive(Debug, Deserialize)]
@@ -267,6 +270,30 @@ pub struct PostgresAdapterConfig {
 pub struct PostgresConfig {
     /// `postgres://user:pass@host:port/db`. May contain `${ENV_VAR}` references
     /// (Phase 19.2) so credentials stay out of the committed config.
+    pub url: String,
+    /// r2d2 pool size (default 4).
+    #[serde(default)]
+    pub pool_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RedisAdapterConfig {
+    pub id: String,
+    pub priority: u32,
+    pub config: RedisConfig,
+
+    #[serde(default)]
+    pub capabilities: Option<AdapterCapabilities>,
+
+    #[serde(default)]
+    pub depends_on: Vec<AdapterId>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RedisConfig {
+    /// `redis://[:password@]host:port[/db]`. May contain `${ENV_VAR}`
+    /// references (Phase 19.2 pattern, reused as-is) so credentials stay out
+    /// of the committed config.
     pub url: String,
     /// r2d2 pool size (default 4).
     #[serde(default)]
@@ -403,6 +430,7 @@ impl AdapterConfig {
             AdapterConfig::KeyValue(cfg) => &cfg.id,
             AdapterConfig::Graph(cfg) => &cfg.id,
             AdapterConfig::Postgres(cfg) => &cfg.id,
+            AdapterConfig::Redis(cfg) => &cfg.id,
         }
     }
 
@@ -413,6 +441,7 @@ impl AdapterConfig {
             AdapterConfig::KeyValue(cfg) => cfg.priority,
             AdapterConfig::Graph(cfg) => cfg.priority,
             AdapterConfig::Postgres(cfg) => cfg.priority,
+            AdapterConfig::Redis(cfg) => cfg.priority,
         }
     }
 
@@ -424,6 +453,7 @@ impl AdapterConfig {
             AdapterConfig::KeyValue(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Graph(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Postgres(cfg) => cfg.capabilities.as_deref(),
+            AdapterConfig::Redis(cfg) => cfg.capabilities.as_deref(),
         }
     }
 
@@ -434,6 +464,7 @@ impl AdapterConfig {
             AdapterConfig::KeyValue(cfg) => &cfg.depends_on,
             AdapterConfig::Graph(cfg) => &cfg.depends_on,
             AdapterConfig::Postgres(cfg) => &cfg.depends_on,
+            AdapterConfig::Redis(cfg) => &cfg.depends_on,
         }
     }
 }
