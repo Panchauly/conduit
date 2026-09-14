@@ -4,6 +4,7 @@
 //! language reproduces from `proto/conduit/v1/ingest.proto` with generated
 //! stubs and ~20 lines of glue.
 
+#[allow(clippy::result_large_err)] // tonic-generated client stubs return `Err(tonic::Status)` directly
 pub mod pb {
     tonic::include_proto!("conduit.v1");
 }
