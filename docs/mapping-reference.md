@@ -69,9 +69,16 @@ columns:
 
 ## Document (`mappings/document/*.yaml`)
 
+The identical mapping file routes to either document backend — `file`
+(file-backed) or `mongodb` (Phase 23) — chosen by which adapter
+`routing.json` points the event type at. Nothing in the mapping itself names
+a backend; on MongoDB, `document` becomes the document's fields directly
+(the projected value *is* the Mongo document, keyed by `_id: <id>`) and a
+named `facet` becomes a server-side `$set` instead of a read-merge-write.
+
 | field | required | meaning |
 |---|---|---|
-| `collection` | yes | output subdirectory under the document adapter's root. |
+| `collection` | yes | output subdirectory under the document adapter's root (file), or the target MongoDB collection name (MongoDB). |
 | `id` | yes | path expression resolving the entity's identity (must be a JSON scalar). |
 | `document` | yes for `upsert` | a JSON-like template; leaf values are `payload.`/`metadata.` paths, resolved recursively. Must be empty (`null`/`{}`/`[]`) for `operation: delete`. |
 

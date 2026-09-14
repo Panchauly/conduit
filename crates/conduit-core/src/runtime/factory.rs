@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::adapter::StorageAdapter;
 use crate::adapter::document::file::FileDocumentAdapter;
 use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::document::mongo::MongoDbAdapter;
 use crate::adapter::document::runtime::DocumentRuntimeBuilder;
 use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::graph::runtime::GraphRuntimeBuilder;
@@ -108,6 +109,21 @@ pub fn build_adapters_from_config(
                 adapters.push(Box::new(RedisAdapter::new(
                     cfg.id.clone(),
                     &url,
+                    cfg.config.pool_size.unwrap_or(4),
+                    cfg.priority,
+                    builder,
+                    Arc::clone(&upcasters),
+                    config.migration_policy,
+                )));
+            }
+
+            AdapterConfig::MongoDb(cfg) => {
+                let builder = DocumentRuntimeBuilder::new(document_mappings.clone());
+                let url = crate::runtime::config::expand_env(&cfg.config.url);
+                adapters.push(Box::new(MongoDbAdapter::new(
+                    cfg.id.clone(),
+                    &url,
+                    cfg.config.database.clone(),
                     cfg.config.pool_size.unwrap_or(4),
                     cfg.priority,
                     builder,

@@ -35,7 +35,7 @@ Conduit is three parts, and each has a different dependency rule:
 
 | Part | What it is | Dependency rule |
 |------|-----------|-----------------|
-| **1. Storage adapters** | speak each target store's own wire protocol (SQLite, Postgres, Redis, and later MongoDB, Neo4j) | **Dependencies are forced** — the client already runs these databases; Conduit must speak them |
+| **1. Storage adapters** | speak each target store's own wire protocol (SQLite, Postgres, Redis, MongoDB, and later Neo4j) | **Dependencies are forced** — the client already runs these databases; Conduit must speak them |
 | **2. Mapping & verification** | declarative YAML — routing, mappings, capabilities, versions — validated before runtime | **Technology-agnostic, dependency-free** — `serde` over YAML, no engine lock-in |
 | **3. Producer ingestion** | how events reach the engine | **No technology lock-in** — Conduit's own contract (a gRPC `.proto`); never "you must use Kafka / a database / a broker" |
 
@@ -56,7 +56,7 @@ Both modes run the identical core engine. Ingestion is stateless — Conduit ack
 
 ## 1.4 Distribution (open-core)
 
-- **Open source (MIT / Apache-2.0):** the core engine and `conduit-core` crate; the gRPC ingestion service, its `.proto` contract, and a reference client; the `file` / `stdin` / `directory` sources; the SQL, document, key-value, and graph adapters (file-backed, plus the SQLite and Postgres SQL backends and the Redis key-value backend).
+- **Open source (MIT / Apache-2.0):** the core engine and `conduit-core` crate; the gRPC ingestion service, its `.proto` contract, and a reference client; the `file` / `stdin` / `directory` sources; the SQL, document, key-value, and graph adapters (file-backed, plus the SQLite and Postgres SQL backends, the Redis key-value backend, and the MongoDB document backend).
 - **Pro / Enterprise:** managed cloud connectors (native Kafka / Kinesis `EventSource` implementations), a distributed multi-node coordinator, compliance/audit encryption adapters, and a visual UI for `conduit explain` topology and execution debugging.
 
 Both tiers target the same `EventSource` trait and the same engine API. The `.proto` is the public ingestion contract regardless of tier.

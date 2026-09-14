@@ -12,6 +12,13 @@ pub enum DocumentError {
     /// Failed to write the document to storage
     WriteFailed(String),
 
+    /// Phase 23.3: a backend's transaction (MongoDB's client-session
+    /// transaction) was aborted by a concurrent writer. Retryable — the
+    /// caller re-runs [`super::exec::project`] from scratch in a fresh
+    /// transaction against a freshly re-read guard, not returned as a hard
+    /// failure.
+    WriteConflict,
+
     /// No upcaster chain from the event's version to the mapping's target version.
     UnsupportedVersion {
         event_type: String,
@@ -32,6 +39,9 @@ impl fmt::Display for DocumentError {
             }
             DocumentError::WriteFailed(msg) => {
                 write!(f, "document write failed: {}", msg)
+            }
+            DocumentError::WriteConflict => {
+                write!(f, "document write conflict: guard changed concurrently")
             }
             DocumentError::UnsupportedVersion {
                 event_type,
