@@ -29,8 +29,8 @@ projection in-process.
 
 - **Concepts & mapping reference:** [`docs/concepts.md`](https://github.com/Panchauly/conduit/blob/master/docs/concepts.md), [`docs/mapping-reference.md`](https://github.com/Panchauly/conduit/blob/master/docs/mapping-reference.md)
 - **Architecture:** [`architecture.md`](https://github.com/Panchauly/conduit/blob/master/architecture.md)
-- **Phase-by-phase history:** [`phases.md`](https://github.com/Panchauly/conduit/blob/master/phases.md)
-- **Producer assumptions:** [`phases/producer-contract.md`](https://github.com/Panchauly/conduit/blob/master/phases/producer-contract.md)
+- **Adding a backend:** [`docs/writing-a-backend.md`](https://github.com/Panchauly/conduit/blob/master/docs/writing-a-backend.md)
+- **Producer assumptions:** [`docs/producer-contract.md`](https://github.com/Panchauly/conduit/blob/master/docs/producer-contract.md)
 
 Licensed under either of [MIT](https://github.com/Panchauly/conduit/blob/master/LICENSE-MIT)
 or [Apache-2.0](https://github.com/Panchauly/conduit/blob/master/LICENSE-APACHE) at your option.

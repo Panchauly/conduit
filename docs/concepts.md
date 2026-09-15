@@ -27,9 +27,9 @@ producer — is the same shape:
 - **`payload`** is opaque JSON, parsed by each mapping's `payload.<field>` /
   `metadata.<field>` path expressions (see
   [`docs/mapping-reference.md`](mapping-reference.md)).
-- **`version`** is the payload's *schema* version, for the Phase 10 upcaster
-  chain — unrelated to `sequence` below. An entity can be on schema
-  `version 3` while its guard lane is at `sequence 47`.
+- **`version`** is the payload's *schema* version, for the upcaster chain —
+  unrelated to `sequence` below. An entity can be on schema `version 3`
+  while its guard lane is at `sequence 47`.
 
 ## `sequence` vs `position` — two different numbers
 
@@ -69,13 +69,27 @@ struct GuardState {
 }
 ```
 
-- **SQL** (SQLite, Postgres): one row per lane in a table Conduit owns,
-  `conduit_projection_state (target_table, entity_key, facet, last_sequence,
-  last_event_id, deleted, permanent, processed_at)`, primary-keyed on the
-  first three columns.
-- **Document / key-value / graph** (file-backed): a JSON sidecar per entity,
-  e.g. `.conduit/entities/<collection>/<entity_id>.done` for the document
-  adapter — the default facet's state inline, named facets in a nested map.
+- **SQL** (SQLite, Postgres, MySQL): one row per lane in a table Conduit
+  owns, `conduit_projection_state (target_table, entity_key, facet,
+  last_sequence, last_event_id, deleted, permanent, processed_at)`,
+  primary-keyed on the first three columns — a *flat* guard, one row per
+  lane, because a relational table naturally works that way.
+- **Document / key-value** (file-backed, MongoDB / Redis): a *nested* guard —
+  one record per entity, with named-facet lanes nested inside it (a JSON
+  sidecar per entity for the file adapters, e.g.
+  `.conduit/entities/<collection>/<entity_id>.done`; a guard document/key of
+  the same shape for MongoDB/Redis).
+- **Graph** (file-backed, Neo4j): nodes use the same nested shape as
+  documents; edges and the file adapter's guard sidecars are flat, one guard
+  record per lane. Neo4j's own guard is a dedicated `__ConduitGuard` node —
+  flat, and for a structural reason, not a preference: Cypher can only
+  compare-and-set a *direct* node property, not a value nested inside one, so
+  the guard has to live as its own node to make the atomicity contract work.
+
+Which shape a given backend uses is a storage-engine decision, not something
+a mapping author configures — see
+[`docs/writing-a-backend.md`](writing-a-backend.md#the-guard-a-model-not-a-requirement)
+if you're implementing a new one.
 
 It is a **derived cache**, not source data: delete it and Conduit rebuilds
 identical state by re-processing every event for that entity from the start
@@ -104,7 +118,7 @@ explainable, not silent.
 ## Facets
 
 A mapping's default target is the **whole entity** — one row, one document,
-one KV value, one graph node. **Facets** (Phase 15) let several event types
+one KV value, one graph node. **Facets** let several event types
 independently own *part* of that entity, each gated on its own sequence
 lane, without clobbering each other.
 
@@ -161,7 +175,7 @@ treat them the way you'd treat a database's own internal indexes.
 
 - [`docs/mapping-reference.md`](mapping-reference.md) — every mapping field,
   per adapter, with examples.
-- [`phases/producer-contract.md`](../phases/producer-contract.md) — the
-  full set of ordering/delivery assumptions a producer must satisfy.
+- [`producer-contract.md`](producer-contract.md) — the full set of
+  ordering/delivery assumptions a producer must satisfy.
 - [`architecture.md`](../architecture.md) — the three-part structure
   (engine / sources / adapters) and dependency rules.

@@ -1,6 +1,6 @@
 # conduit-ingest
 
-Conduit's gRPC ingestion server (Phase 20): a `tonic` server implementing the
+Conduit's gRPC ingestion server: a `tonic` server implementing the
 [`conduit/v1`](https://github.com/Panchauly/conduit/blob/master/proto/conduit/v1/ingest.proto)
 `Ingest` contract, plus `GrpcSource` — an `EventSource` (from `conduit-core`) that a normal
 `conduit_core::run_sources` loop drives like any file source. `tonic` lives only in this

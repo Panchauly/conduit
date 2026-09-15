@@ -11,7 +11,7 @@ Conduit is designed to be:
 * replay-safe
 * side-effect aware
 
-It is intentionally **not** a streaming platform, workflow engine, or database.
+It is intentionally **not** a streaming platform, a workflow engine, a database, an ETL/ELT tool, or a schema-inference system.
 
 ---
 
@@ -25,7 +25,7 @@ Conduit's job is **projection only**. It takes an event payload, resolves where 
 | **Transport / external world** | durability, wire protocols, network transport, and consumer offsets — everything behind the `EventSource` trait |
 | **Conduit** | resolve where an event goes (routing), verify it is safe to write (validation), order execution deterministically (dependency graph), project it into target storage models without corrupting state (`decide()` + per-lane guards) |
 
-Everything Conduit relies on from the application and transport — a monotonic per-entity `sequence`, a stable canonical entity id, per-entity delivery order — it assumes and cannot verify. Those assumptions are catalogued in [`phases/producer-contract.md`](phases/producer-contract.md).
+Everything Conduit relies on from the application and transport — a monotonic per-entity `sequence`, a stable canonical entity id, per-entity delivery order — it assumes and cannot verify. Those assumptions are catalogued in [`docs/producer-contract.md`](docs/producer-contract.md).
 
 ---
 
@@ -54,12 +54,25 @@ Both modes run the identical core engine. Ingestion is stateless — Conduit ack
 
 ---
 
-## 1.4 Distribution (open-core)
+## 1.4 Distribution
 
-- **Open source (MIT / Apache-2.0):** the core engine and `conduit-core` crate; the gRPC ingestion service, its `.proto` contract, and a reference client; the `file` / `stdin` / `directory` sources; the SQL, document, key-value, and graph adapters — all four with a real backend (file-backed, plus SQLite, Postgres, and MySQL for SQL, Redis for key-value, MongoDB for document, and Neo4j for graph).
-- **Pro / Enterprise:** managed cloud connectors (native Kafka / Kinesis `EventSource` implementations), a distributed multi-node coordinator, compliance/audit encryption adapters, and a visual UI for `conduit explain` topology and execution debugging.
+Conduit separates **the engine** from **the operational product built on it**, and draws that line on capability, not on features:
 
-Both tiers target the same `EventSource` trait and the same engine API. The `.proto` is the public ingestion contract regardless of tier.
+- **Open source (MIT / Apache-2.0) — the complete engine.** Every storage kind, with a real backend, lives in this repo: SQL (SQLite, Postgres, MySQL), key-value (file, Redis), document (file, MongoDB), graph (file, Neo4j) — and a public extension point (`SqlTxn` / `KvBackend` / `DocumentBackend` / `GraphBackend` plus `register_adapter_factory`; see [`docs/writing-a-backend.md`](docs/writing-a-backend.md)) for anyone to add a store this repo doesn't ship. Every source — `file`/`stdin`/`directory`, the gRPC ingestion contract, and native broker/outbox connectors (Kafka, Kinesis, Postgres-outbox) when they're built. Multi-node coordination, if Conduit ever needs it, is engine capability and belongs here too. **Nothing that changes what Conduit can project is held back for a paid tier** — capability lives entirely in the open-source engine, and growing it doesn't require the core team.
+- **The product is purely operational.** It runs the open-source engine as a managed service and adds nothing the engine itself lacks: hosted/managed Conduit instances, a control-plane UI (topology, execution monitoring, guard-state inspection — visualizing `conduit explain`, not extending it), multi-tenant provisioning, backups/DR of guard state, one-click deploy, SLAs and support. If it ever hosts ingestion, it's still just running `conduit-ingest` for you.
+- **A possible further self-hosted add-on, undecided:** compliance-oriented features (SSO, audit logging, at-rest encryption) could exist as a separate self-hosted layer without contradicting this split. Not designed now; noted so it isn't confused with the operational product above.
+
+---
+
+## 1.5 Design principles
+
+- Event-first — routing is by `event_type`, never content or metadata heuristics.
+- Explicit over implicit — mappings are declared, not inferred; no hidden defaults.
+- Deterministic execution — the same event log always produces the same projected state.
+- Schema-driven mappings — every projection is a YAML declaration, not code.
+- Fail fast — configuration errors surface at startup, not mid-run.
+
+Every design decision is evaluated against one question: **can the behavior be explained deterministically by reading the code and configuration?** If the answer is no, the feature does not belong in Conduit.
 
 ---
 
@@ -144,11 +157,12 @@ The CLI is a **control surface**, not a runtime container.
 
 Commands:
 
-* `run` — real execution: one-shot with `--event <file>`, or the continuous source loop (`--once` to drain and exit) when the config declares `sources:` (Phase 17)
+* `run` — real execution: one-shot with `--event <file>`, or the continuous source loop (`--once` to drain and exit) when the config declares `sources:`
 * `sources` — list configured sources and their committed positions
 * `explain` — routing + dependency order for one event, no execution
 * `dry-run` — full simulated execution, no writes
 * `replay` — drain a directory / NDJSON file once (superseded by `run --once`; kept for compatibility)
+* `ingest` — run the gRPC ingestion service, projecting whatever a connected producer streams in
 
 The CLI performs:
 
@@ -192,7 +206,7 @@ Dispatch is responsible for:
 
 Dispatch semantics:
 
-* adapters run in dependency order (Kahn's algorithm over `depends_on`, then priority — Phase 9), not just priority
+* adapters run in dependency order (a topological sort over `depends_on`, then priority), not just priority
 * on failure, `FailurePolicy` decides: `fail_fast` (default) stops the batch; `continue_on_error` runs every routed adapter
 * downstream adapters of a failed dependency are skipped
 * results are always reported
@@ -222,13 +236,17 @@ Adapters are:
 * blocking
 * side-effecting
 
-Every adapter's write is gated by one shared pure function, `decide()` (`adapter/mod.rs`): given the `Operation` (`upsert` / `delete`), the mapping's `on_existing` mode, the persisted guard state for that entity's lane (`last_sequence`, `deleted`, `permanent`), and the event's `sequence`, it returns a `WriteDecision` (`Insert` / `Update` / `Delete` / one of the skip variants). The four adapters call it unchanged — sequence gating, redelivery, tombstones, and resurrection are decided once, not four times.
+Every adapter's write is gated by one shared pure function, `decide()` (`adapter/mod.rs`): given the `Operation` (`upsert` / `delete`), the mapping's `on_existing` mode, the persisted guard state for that entity's lane (`last_sequence`, `deleted`, `permanent`), and the event's `sequence`, it returns a `WriteDecision` (`Insert` / `Update` / `Delete` / one of the skip variants). Every adapter — file-backed or backed by a real database — calls it unchanged: sequence gating, redelivery, tombstones, and resurrection are decided once, not once per backend.
 
-The result is an `AdapterResult` carrying an `AdapterOutcome` — `Created` / `Updated` / `Deleted` / `Skipped(SkipReason)` / `Failed(AdapterError)` (Phase 12.1). A skip is not a failure; `SkipReason` (`AlreadyProjected`, `StaleSequence`, `AlreadyDeleted`, `Tombstoned`, `EntityAbsent`, `UnsupportedVersion`) is machine-readable and round-trips into the JSON execution report.
+The result is an `AdapterResult` carrying an `AdapterOutcome` — `Created` / `Updated` / `Deleted` / `Skipped(SkipReason)` / `Failed(AdapterError)`. A skip is not a failure; `SkipReason` (`AlreadyProjected`, `StaleSequence`, `AlreadyDeleted`, `Tombstoned`, `EntityAbsent`, `UnsupportedVersion`) is machine-readable and round-trips into the JSON execution report.
+
+Adding a real database backend for a storage kind — or a kind this repo doesn't ship — means implementing one small trait (`SqlTxn`, `KvBackend`, `DocumentBackend`, or `GraphBackend`) and registering it; see [`docs/writing-a-backend.md`](docs/writing-a-backend.md).
 
 ---
 
 ### 4.2 SQL Adapter
+
+Backends: SQLite, Postgres, MySQL.
 
 Responsibilities:
 
@@ -244,36 +262,44 @@ Non-responsibilities:
 
 Idempotency:
 
-* enforced via the `conduit_projection_state` guard table, PK `(target_table, entity_key, facet)` (Phases 11 / 15)
+* enforced via the `conduit_projection_state` guard table, primary-keyed on `(target_table, entity_key, facet)`
 * stored in the same database, atomic with projection execution
-* `on_existing: replace` builds `INSERT … ON CONFLICT (<pk>) DO UPDATE SET …` (Phase 12); a named facet restricts the `SET` list to its own columns (Phase 15)
+* `on_existing: replace` builds `INSERT … ON CONFLICT (<pk>) DO UPDATE SET …` (`ON DUPLICATE KEY UPDATE` on MySQL, which has no `ON CONFLICT` syntax); a named facet restricts the `SET` list to its own columns
+
+Postgres and MySQL hold a pessimistic row lock (`SELECT … FOR UPDATE`) across the guard read and write, so concurrent writers to the same entity serialize instead of racing.
 
 ---
 
-### 4.3 Document Adapter (File-Based)
+### 4.3 Document Adapter
+
+Backends: file, MongoDB.
 
 Responsibilities:
 
 * build document JSON via mappings
-* determine filesystem layout — output keyed by `(collection, entity_id)` (Phase 13.3), not `event_type`
-* write files deterministically via write-to-temp-then-rename
+* determine where the document lives — keyed by `(collection, entity_id)`, not `event_type`
+* write deterministically
 
 Idempotency:
 
-* enforced via a per-entity JSON guard sidecar (`last_sequence` / `deleted` / `permanent`, plus a `facets` map — Phases 11 / 13 / 15)
-* adapter-local state only; single-writer assumption
+* enforced via a per-entity guard (`last_sequence` / `deleted` / `permanent`, plus a `facets` map for named-facet lanes) — a JSON sidecar file for the file backend, a guard document for MongoDB
+* the file backend's guard is adapter-local, single-writer; MongoDB wraps the guard-and-document write pair in a real client-session transaction
 
 ---
 
-### 4.4 Key-Value Adapter (File-Based) — Phase 14
+### 4.4 Key-Value Adapter
 
-A flat namespace → key → value store: `{root}/{namespace}/{key}.json` plus a guard sidecar. The simplest adapter — no query language, no schema — added as a generalization test for the abstraction. Same `decide()`, same guard shape, `facets` on the value.
+Backends: file, Redis.
+
+A flat namespace → key → value store: `{root}/{namespace}/{key}.json` (file) or `{namespace}:{entity_key}` (Redis), each with its own guard. The simplest storage kind — no query language, no schema. Same `decide()`, same guard shape, `facets` on the value.
 
 ---
 
-### 4.5 Graph Adapter (File-Based) — Phase 16
+### 4.5 Graph Adapter
 
-A directed property graph. Nodes and edges are *separately keyed records*, each an independent `decide()` lane: a node keyed by `node_id`, an edge by the canonical `[edge_type, from, to(, discriminator)]`. `operation: delete` on a node is a `DETACH DELETE` — it removes the node and every incident edge (tracked in a per-node incident index) in one adapter operation. Nodes are entities (facets apply); edges are not.
+Backends: file, Neo4j.
+
+A directed property graph. Nodes and edges are *separately keyed records*, each an independent `decide()` lane: a node keyed by `node_id`, an edge by the canonical `[edge_type, from, to(, discriminator)]`. `operation: delete` on a node is a `DETACH DELETE` — it removes the node and every incident edge in one adapter operation (the file backend tracks a per-node incident index for this; Neo4j's own graph structure makes a separate index unnecessary). Nodes are entities (facets apply); edges are not.
 
 ---
 
@@ -299,26 +325,26 @@ They are intentionally opaque.
 
 ---
 
-## 6. Idempotency Model (Phases 11–17)
+## 6. Idempotency Model
 
 ### 6.1 Definition
 
-Idempotency is **entity-keyed and sequence-gated**, not `event_id`-keyed (Phase 11 superseded the Phase 4 `conduit_events` / event-id model).
+Idempotency is **entity-keyed and sequence-gated**, never `event_id`-keyed alone.
 
 A guard lane is `(target, entity_key, facet)`. Its state is `{ last_sequence, deleted, permanent }`. For each event, `decide()` compares the event's `sequence` to `last_sequence`:
 
 * a **redelivery or superseded** event (`sequence <= last_sequence`) is `Skipped(StaleSequence)` — no write
 * a **newer** `upsert` under `on_existing: replace` overwrites; under `ignore` an already-projected entity is `Skipped(AlreadyProjected)`
-* a **newer** `delete` writes a tombstone (`deleted = true`); `permanent` tombstones reject every later event forever (Phase 13)
-* a newer `upsert` on a non-permanent tombstone **resurrects** the entity (Phase 13.4)
+* a **newer** `delete` writes a tombstone (`deleted = true`); `permanent` tombstones reject every later event forever
+* a newer `upsert` on a non-permanent tombstone **resurrects** the entity
 
 ---
 
 ### 6.2 Scope
 
 * idempotency is adapter-local — no global coordination, no exactly-once *delivery*
-* combined with an at-least-once source and a committed checkpoint, it yields **effectively-once projection** (Phase 17): the state after any sequence of crashes / restarts / redeliveries equals a single clean pass
-* each adapter enforces the guard using storage-native mechanisms (a SQL table row, a JSON sidecar)
+* combined with an at-least-once source and a committed checkpoint, it yields **effectively-once projection**: the state after any sequence of crashes / restarts / redeliveries equals a single clean pass
+* each adapter enforces the guard using storage-native mechanisms — a table row, a JSON sidecar, a document, a graph node
 
 ---
 
@@ -329,7 +355,7 @@ If an adapter:
 * fails before recording the guard → retry is possible (the source re-polls the uncommitted batch)
 * records the guard → replay of that event becomes a `Skipped(*)` no-op
 
-There is no attempt to reconcile partial success across adapters within one event; the source-loop retry / DLQ / halt decision is across *batches* (Phase 17.5).
+There is no attempt to reconcile partial success across adapters within one event; the source-loop retry / dead-letter / halt decision is across *batches*.
 
 ---
 
@@ -349,8 +375,6 @@ struct AdapterResult {
 }
 ```
 
-(Phase 12.1 replaced the `success: bool` + skip-message encoding with the `AdapterOutcome` enum.)
-
 Errors are **observable and explicit**.
 
 ---
@@ -365,7 +389,7 @@ Errors are never swallowed. Skips are not errors.
 
 ---
 
-## 8. Phase Boundaries (Intentional Limitations)
+## 8. Intentional Limitations
 
 Conduit explicitly does **not** provide:
 
@@ -378,7 +402,7 @@ Conduit explicitly does **not** provide:
 * distributed / multi-instance coordination — one projector owns its sources' positions
 * implicit behavior
 
-The Phase 17 `run` loop does across-*batch* retry (with a bounded budget) and a DLQ for poison events — this is the one deliberate step past "no retries", scoped to the source-consumption boundary. These are architectural constraints, not missing features.
+The `run` loop does one deliberate exception, scoped to the source-consumption boundary: across-*batch* retry with a bounded budget, and a dead-letter queue for poison events. These are architectural constraints, not missing features.
 
 ---
 
@@ -400,8 +424,11 @@ If the answer is no, the feature does not belong in Conduit.
 
 ## 10. Status
 
-* Phases 1–18 complete (see [`phases.md`](phases.md))
-* Four storage adapters (SQL, Document, Key-Value, Graph) + two event sources (directory, stdin), all file-backed
-* Core architecture locked; future phases must preserve existing semantics and the `decide()` contract
+* Four storage kinds — SQL, Document, Key-Value, Graph — each with a real database backend alongside a file-backed default (nine backends total: SQLite, Postgres, MySQL, file + Redis, file + MongoDB, file + Neo4j)
+* Three event sources — `directory`, `stdin`, and a gRPC ingestion service with a versioned, technology-agnostic contract
+* A public extension point for adding further backends without forking the crate (see [`docs/writing-a-backend.md`](docs/writing-a-backend.md))
+* Core architecture locked: the `decide()` contract, the guard model, and the adapter/source traits are the stable surface any future backend or source must preserve
+
+See [`RELEASES/`](RELEASES/) for the version-by-version changelog and [`ROADMAP.md`](ROADMAP.md) for open work.
 
 This document defines the **architectural contract** of Conduit.

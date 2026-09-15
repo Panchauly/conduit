@@ -15,7 +15,7 @@ identity/body fields differ (`table`+`primary_key`+`columns` vs.
 | field | required | default | meaning |
 |---|---|---|---|
 | `event` | yes | — | the `event_type` this mapping matches. One mapping file per event type per adapter. |
-| `version` | yes | — | target schema version this mapping projects into (≥ 1). Feeds the Phase 10 upcaster chain when an incoming event's `version` differs. |
+| `version` | yes | — | target schema version this mapping projects into (≥ 1). Feeds the upcaster chain when an incoming event's `version` differs. |
 | `operation` | no | `upsert` | `upsert` (create/update) or `delete` (tombstone). A `delete` mapping's body must resolve only the identity — no columns/document/value/properties beyond what identity needs. |
 | `on_existing` | no | `ignore` | `upsert`-only. `ignore`: first write for an entity wins, later ones are `SkipIdempotent`. `replace`: sequence-gated full overwrite. |
 | `permanent` | no | `false` | `delete`-only. Marks the tombstone permanent — every later event for this key is rejected forever, no resurrection. |
@@ -70,7 +70,7 @@ columns:
 ## Document (`mappings/document/*.yaml`)
 
 The identical mapping file routes to either document backend — `file`
-(file-backed) or `mongodb` (Phase 23) — chosen by which adapter
+(file-backed) or `mongodb` — chosen by which adapter
 `routing.json` points the event type at. Nothing in the mapping itself names
 a backend; on MongoDB, `document` becomes the document's fields directly
 (the projected value *is* the Mongo document, keyed by `_id: <id>`) and a
@@ -109,7 +109,7 @@ document:
 ## Key-value (`mappings/keyvalue/*.yaml`)
 
 The identical mapping file routes to either KV backend — `keyvalue` (file-backed)
-or `redis` (Phase 22) — chosen by which adapter `routing.json` points the event
+or `redis` — chosen by which adapter `routing.json` points the event
 type at. Nothing in the mapping itself names a backend.
 
 | field | required | meaning |
@@ -132,7 +132,7 @@ value:
 
 A graph mapping is a `kind`-tagged union: exactly one of `node` or `edge`
 per mapping file. The identical mapping file routes to either graph backend
-— `graph` (file-backed) or `neo4j` (Phase 24) — chosen by which adapter
+— `graph` (file-backed) or `neo4j` — chosen by which adapter
 `routing.json` points the event type at. On Neo4j, `label`/`edge_type`
 become the node label / relationship type directly, `properties` become the
 record's properties, and a node's `key` (or an edge's resolved identity)

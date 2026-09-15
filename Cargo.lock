@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap",
  "conduit-core",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-client"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "prost",
  "protoc-bin-vendored",
@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "mongodb",
@@ -535,7 +535,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-ingest"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "conduit-client",
  "conduit-core",

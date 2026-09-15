@@ -2,8 +2,6 @@
 
 Conduit is projection-only ([`architecture.md` §1.1](../architecture.md)). It consumes an event log it does not own, and its determinism / idempotency / replay guarantees hold **only if the events it receives satisfy the assumptions below**. Conduit sees one event at a time and cannot verify any of them — they are the application's and transport's responsibility.
 
-This file consolidates assumptions that were introduced piecemeal across Phases 11–17.
-
 ---
 
 ## 1. `Event.sequence` — monotonic per entity
@@ -16,8 +14,6 @@ This file consolidates assumptions that were introduced piecemeal across Phases 
 
 **If violated.** Two distinct events sharing a sequence → the later-delivered one is judged stale and dropped (silent loss). A decreasing sequence → the "newer" update is rejected as stale.
 
-**Introduced:** Phase 11 (field), Phase 12 (gating).
-
 ---
 
 ## 2. Entity id — stable, canonical, scalar
@@ -26,21 +22,17 @@ This file consolidates assumptions that were introduced piecemeal across Phases 
 
 **If violated.** `550e8400-…` in one event and `{550E8400-…}` in another are two different `entity_key`s → two guard lanes → the "update" inserts a second entity instead of updating the first. Silent.
 
-**Introduced:** Phase 11.1 (scalar requirement, canonical encoding), Phase 12 (guard lookup by raw string).
-
 ---
 
 ## 3. Per-entity delivery order
 
 **Assumption.** Each entity's events reach Conduit in sequence order.
 
-- The replay / batch sort tolerates *local* reordering within a batch — it sorts by `sequence` before dispatch (Phase 15.5).
+- Batch dispatch tolerates *local* reordering within a batch — it sorts by `sequence` before dispatch.
 - It does **not** tolerate: an event permanently dropped; or, under `on_existing: ignore`, a lower-sequence event arriving *after* that entity's lane has already advanced (the first-delivered event wins, so a late "create" is skipped and its data never lands).
 - `on_existing: replace` and facet lanes are order-independent *within a lane* — highest sequence wins — but a facet update delivered before the entity's create is skipped (`EntityAbsent`) in a live feed.
 
-**If violated.** Lost updates (ignore mode) or skipped facet writes (out-of-order create).
-
-**Introduced:** Phase 12 (gate), Phase 15 (facets, sequence-ordered replay).
+**If violated.** Lost updates (`ignore` mode) or skipped facet writes (out-of-order create).
 
 ---
 
@@ -50,8 +42,6 @@ This file consolidates assumptions that were introduced piecemeal across Phases 
 
 **If violated.** Two sources feeding the same entity can interleave arbitrarily; the sequence gate still prevents corruption but convergence is not guaranteed if the sources' positions advance independently.
 
-**Introduced:** Phase 17.
-
 ---
 
 ## 5. Delete route ⊇ create route
@@ -59,8 +49,6 @@ This file consolidates assumptions that were introduced piecemeal across Phases 
 **Assumption.** A `delete` event (e.g. `OrderCancelled`) routes to *at least* the same adapters its `create` event (`OrderCreated`) routed to.
 
 **If violated.** The entity is removed from some stores and left in others. Conduit routes by `event_type` and cannot compare the two routes.
-
-**Introduced:** Phase 13.5.
 
 ---
 
@@ -70,15 +58,13 @@ This file consolidates assumptions that were introduced piecemeal across Phases 
 
 **If violated.** Conduit has no read-modify-write path; a delta would be written literally as the new value.
 
-**Introduced:** Phase 12 (design position), Phase 15 (restated for facets).
-
 ---
 
-## 7. Graph endpoint order (file-backed adapter)
+## 7. Graph endpoint order
 
-**Assumption.** If edges reference nodes, the producer emits the node before edges that point at it — *when the target graph backend enforces endpoint existence*. The file-backed adapter is permissive (opaque node ids); a future enforcing backend would emit `Skipped(EndpointAbsent)`.
+**Assumption.** If edges reference nodes, the producer emits the node before edges that point at it — *when the target graph backend enforces endpoint existence*. The file-backed graph adapter is permissive about this (node ids are opaque strings); a backend that does enforce it (or a future one that would) responds with `Skipped(EndpointAbsent)` instead.
 
-**Introduced:** Phase 16.3.
+**If violated (permissive backend):** nothing — the edge is written referencing a node that doesn't exist yet, and resolves once the node arrives. **If violated (enforcing backend):** the edge write is skipped until the node exists.
 
 ---
 
@@ -86,6 +72,8 @@ This file consolidates assumptions that were introduced piecemeal across Phases 
 
 **Assumption.** A producer writing event files into a watched directory writes to a temp name and `rename`s the finished file in — never appends to a file Conduit may already be reading.
 
-**If violated.** The directory source reads a whole file at once; a half-written trailing NDJSON line is a parse error → that line is DLQ'd, the rest of the file continues.
+**If violated.** The directory source reads a whole file at once; a half-written trailing NDJSON line is a parse error → that line is sent to the dead-letter queue, and the rest of the file continues.
 
-**Introduced:** Phase 17 (NDJSON handling).
+## Kafka-specific (once a native Kafka source exists)
+
+**Assumption.** A producer partitions by entity id, so one entity's events land in one partition and Kafka's own per-partition ordering guarantee satisfies rule 3 above. A single consumer-group member reads the whole topic — splitting partitions across multiple Conduit instances can move an entity's stream mid-flight and break ordering for it.

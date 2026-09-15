@@ -17,17 +17,16 @@ use crate::event::Event;
 // The guard — reused as-is as the wire format for every backend (Phase 24.1)
 // ---------------------------------------------------------------------------
 
-/// Idempotency guard for one graph record, node or edge (Phase 13/15/16.2).
-/// The default facet stays in the flat fields; named-facet lanes (nodes
-/// only) live in `facets`. This in-memory shape is shared by every backend,
-/// but the *wire* shape isn't uniform the way it is for KV/Document: the
-/// file sidecar serializes this struct as-is (one JSON file per entity,
-/// facets nested), while Neo4j spreads it across one flat `__ConduitGuard`
-/// node per facet lane instead — its CAS needs `last_sequence` to be a
-/// plain queryable property, and a nested map isn't a valid property value
-/// at all, so a single JSON blob (even as a string) couldn't be compared in
-/// a Cypher `WHERE`. See `phases/phase-24-neo4j-graph-backend.md`'s "As
-/// built" notes.
+/// Idempotency guard for one graph record, node or edge. The default facet
+/// stays in the flat fields; named-facet lanes (nodes only) live in
+/// `facets`. This in-memory shape is shared by every backend, but the
+/// *wire* shape isn't uniform the way it is for KV/Document: the file
+/// sidecar serializes this struct as-is (one JSON file per entity, facets
+/// nested), while Neo4j spreads it across one flat `__ConduitGuard` node
+/// per facet lane instead — its CAS needs `last_sequence` to be a plain
+/// queryable property, and a nested map isn't a valid property value at
+/// all, so a single JSON blob (even as a string) couldn't be compared in a
+/// Cypher `WHERE`.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct GraphGuard {
     #[serde(default)]

@@ -16,9 +16,11 @@ pub struct Event {
     #[serde(default = "default_event_version")]
     pub version: u32,
     /// Monotonic per-entity sequence number from the source stream. Required —
-    /// no default — because it is captured now for forward compatibility with a
-    /// future Upsert phase (Phase 11 non-goal); it does not gate accept/reject
-    /// in this phase (see `phases/phase-11-entity-aware-idempotent-insert.md`).
+    /// no default. This is what `decide()` (`adapter/mod.rs`) gates every write
+    /// on: a redelivered or superseded event (`sequence <= last_sequence` on its
+    /// guard lane) is skipped rather than reapplied. See
+    /// `docs/producer-contract.md` for the monotonicity contract a producer
+    /// must satisfy.
     pub sequence: u64,
 }
 
