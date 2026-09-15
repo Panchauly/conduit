@@ -1,7 +1,7 @@
 # The Conduit ingestion contract
 
 [`conduit/v1/ingest.proto`](conduit/v1/ingest.proto) is Conduit's technology-agnostic
-producer contract (Phase 20): one bidirectional streaming RPC. A producer in any
+producer contract: one bidirectional streaming RPC. A producer in any
 `protoc`/`buf`-supported language streams `EventEnvelope`s in and reads `Ack`s back —
 nothing about the wire format is Rust-specific. [`conduit-client`](../crates/conduit-client/)
 is the reference implementation; this file is the language-agnostic entry point for
@@ -78,7 +78,7 @@ The two fields worth getting right:
   resume `events_after(...)` after a restart. Conduit only ever echoes back the highest
   one whose batch is durably committed — persist it before treating that batch as done.
 
-See [`phases/producer-contract.md`](../phases/producer-contract.md) for the complete set
+See [`docs/producer-contract.md`](../docs/producer-contract.md) for the complete set
 of ordering and delivery assumptions, and
 [`crates/conduit-client/src/lib.rs`](../crates/conduit-client/src/lib.rs) for a full,
 real implementation of the same five steps in Rust.

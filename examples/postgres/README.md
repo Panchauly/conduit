@@ -1,22 +1,20 @@
 # postgres
 
-The facet showcase, against a real Postgres (Phase 19's SQL backend).
+The facet showcase, against a real Postgres backend.
 
 ```sh
 export DATABASE_URL=postgres://user:pass@localhost:5432/dbname   # or accept the default
 bash run.sh
 ```
 
-> **Note:** this wasn't run against a live Postgres while writing it — there was no Docker
-> daemon available in that environment. It mirrors the already-verified
-> `crates/conduit-ingest/tests/pg_backend.rs` scenarios and the shared `exec::project` write
-> path (Phase 19.1), which behaves identically on SQLite and Postgres by construction. CI's
-> `test-postgres` job (`.github/workflows/ci.yml`) runs this against a real Postgres service
-> container on every push.
+This mirrors the scenarios in `crates/conduit-core/tests/pg_backend.rs`, and the shared
+`exec::project` write path, which behaves identically on SQLite and Postgres by
+construction. CI's `test-postgres` job (`.github/workflows/ci.yml`) runs this against a
+real Postgres service container on every push.
 
 ## What happens
 
-Three events project one `users` row split into two independent facets (Phase 15):
+Three events project one `users` row split into two independent facets:
 
 | # | event | facet | column | sequence |
 |---|---|---|---|---|
@@ -32,9 +30,9 @@ identical — that's the guarantee under test: a facet update never depends on a
 facet having landed first, or last.
 
 Postgres is also the first Conduit adapter with real multi-writer safety
-(`SELECT ... FOR UPDATE` on the guard row, Phase 19.4) — two `conduit` processes racing
-the same row converge to one write and one clean skip, never a lost update or a raw
-constraint error.
+(`SELECT ... FOR UPDATE` on the guard row) — two `conduit` processes racing the same
+row converge to one write and one clean skip, never a lost update or a raw constraint
+error.
 
 ## Next
 

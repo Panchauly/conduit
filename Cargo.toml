@@ -13,7 +13,7 @@ members = [
 exclude = ["examples"]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Panchauly/conduit"
@@ -21,6 +21,6 @@ authors = ["Conduit Contributors"]
 rust-version = "1.88"
 
 [workspace.dependencies]
-conduit-core = { path = "crates/conduit-core", version = "0.7.0" }
-conduit-ingest = { path = "crates/conduit-ingest", version = "0.7.0" }
-conduit-client = { path = "crates/conduit-client", version = "0.7.0" }
+conduit-core = { path = "crates/conduit-core", version = "0.8.0" }
+conduit-ingest = { path = "crates/conduit-ingest", version = "0.8.0" }
+conduit-client = { path = "crates/conduit-client", version = "0.8.0" }

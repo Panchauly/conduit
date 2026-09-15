@@ -10,8 +10,8 @@ insert, update, delete, or skip.
 
 Implement one of these traits, register a factory, and every mapping feature
 — facets, deletes, tombstones, resurrection, out-of-order redelivery — works
-for free. This is Conduit's public extension point (Phase 25): you do not
-fork `conduit-core` to add a backend it doesn't ship.
+for free. This is Conduit's public extension point: you do not fork
+`conduit-core` to add a backend it doesn't ship.
 
 ## Which trait, for which storage kind
 
@@ -186,9 +186,8 @@ above, not a hypothetical:
   cross-backend convergence with SQLite, and concurrent writers under the
   `FOR UPDATE` lock.
 
-MySQL ships inside `conduit-core` itself (a deliberate product decision —
-see `phases/phase-25-backend-extension-api.md`'s "As built" notes), not as a
-separate crate. A community backend for a store Conduit doesn't ship
+MySQL ships inside `conduit-core` itself (a deliberate product decision), not
+as a separate crate. A community backend for a store Conduit doesn't ship
 (DynamoDB, Elasticsearch, …) follows the exact same pattern from its own,
 separate crate: implement the trait that matches your storage kind, satisfy
 the atomicity contract, decide on a guard shape, and call

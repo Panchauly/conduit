@@ -8,6 +8,12 @@ stores using explicit, schema-driven mappings. It is **projection-only**: it con
 event log it does not own and never produces, buffers, or stores events itself (see
 [`architecture.md` §1.1](architecture.md)).
 
+Every storage kind has a real database backend, not just a file-backed default — SQL on
+SQLite, Postgres, or MySQL; key-value on Redis; document on MongoDB; graph on Neo4j —
+all nine behind the exact same sequence-gated idempotency model. Adding a tenth is a
+public extension point, not a fork: see
+[`docs/writing-a-backend.md`](docs/writing-a-backend.md).
+
 ## Quickstart
 
 ```sh
@@ -74,15 +80,24 @@ over convenience throughout.
   storage kind, with examples.
 - [`architecture.md`](architecture.md) — the three-part structure (engine / sources /
   adapters), dependency rules, and open-source vs. product scope.
-- [`phases.md`](phases.md) — the phase-by-phase build history.
-- [`phases/producer-contract.md`](phases/producer-contract.md) — the ordering/delivery
+- [`docs/producer-contract.md`](docs/producer-contract.md) — the ordering/delivery
   assumptions a producer must satisfy.
 - [`proto/README.md`](proto/README.md) — write a non-Rust producer against the gRPC
   ingestion contract.
+- [`docs/writing-a-backend.md`](docs/writing-a-backend.md) — add a real database
+  backend for a storage kind Conduit doesn't ship, without forking the crate.
+- [`ROADMAP.md`](ROADMAP.md) — where things stand and what's still open.
+
+## Contributing
+
+Bug reports, mapping-reference corrections, and new backends are all welcome — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup and the PR process, and
+[`docs/writing-a-backend.md`](docs/writing-a-backend.md) specifically for adding a
+database backend.
 
 ## Status
 
-Latest release notes: **[`RELEASES/v0.7.0.md`](RELEASES/v0.7.0.md)**.
+Latest release notes: **[`RELEASES/v0.8.0.md`](RELEASES/v0.8.0.md)**.
 
 Conduit is in an **alpha** phase — core architecture and execution semantics are stable,
 but public APIs may still evolve. Intended for early feedback, not production

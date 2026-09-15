@@ -1,9 +1,9 @@
 # grpc-producer
 
-The gRPC ingestion deployment mode (Phase 20): run `conduit ingest` as a
-long-lived service and stream events into it from any producer over
+The gRPC ingestion deployment mode: run `conduit ingest` as a long-lived
+service and stream events into it from any producer over
 `proto/conduit/v1/ingest.proto`, instead of feeding it files through a
-Phase 17 source. This example's producer is
+directory or stdin source. This example's producer is
 [`conduit-client`](../../crates/conduit-client/), the reference Rust SDK —
 the same ~20 lines of glue any `protoc`-generated client reproduces.
 
@@ -29,8 +29,8 @@ needs no external infrastructure and runs the same way locally as
 
 ## Notes
 
-- `config.yaml` has no `sources:` block: gRPC ingestion (Phase 20) bypasses
-  the Phase 17 file-source path entirely.
+- `config.yaml` has no `sources:` block: gRPC ingestion bypasses the
+  file-source path entirely.
 - `position` in each `EventEnvelope` is the producer's own opaque offset —
   Conduit never interprets it, only echoes the highest committed one back in
   an `Ack`. This producer waits for the ack covering `"offset-2"` before
@@ -41,5 +41,5 @@ needs no external infrastructure and runs the same way locally as
 
 - [`docs/concepts.md`](../../docs/concepts.md) for the event envelope and
   position model.
-- [`phases/producer-contract.md`](../../phases/producer-contract.md) for the
+- [`docs/producer-contract.md`](../../docs/producer-contract.md) for the
   full producer contract this example implements a slice of.

@@ -18,8 +18,7 @@
 //! than every other backend's guard (one record per *entity*, facets nested
 //! inside) because Neo4j's CAS needs `last_sequence` to be a plain queryable
 //! property per lane — a nested map isn't a valid property value at all, and
-//! even a JSON-string blob couldn't be compared in a Cypher `WHERE`. See
-//! `phases/phase-24-neo4j-graph-backend.md`'s "As built" notes.
+//! even a JSON-string blob couldn't be compared in a Cypher `WHERE`.
 
 use std::sync::{Arc, Mutex};
 
