@@ -37,3 +37,9 @@ redis = { version = "1", features = ["r2d2"] }
 # (matching the synchronous adapter path); no r2d2 pool needed — `Client` is
 # already an internally-pooled, cheaply-cloneable handle.
 mongodb = { version = "3", features = ["sync"] }
+
+# Phase 24: Neo4j graph backend. `neo4rs` is async-only (Bolt protocol, no
+# sync feature) — wrapped in a small internal `tokio` runtime, the same
+# pattern Phase 19.2 used for the sync `postgres` crate over `tokio-postgres`.
+neo4rs = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread"] }

@@ -37,11 +37,13 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace
-        # No CONDUIT_PG_URL / CONDUIT_REDIS_URL / CONDUIT_MONGO_URL / Docker
-        # here — the Phase 19.6 `pg_backend`, Phase 22.5 `redis_backend`, and
-        # Phase 23.5 `mongo_backend` suites, and the Phase 21.6 `#[cfg(unix)]`
-        # UDS test, skip or don't compile (Windows) accordingly. See
-        # `test-postgres` / `test-redis` / `test-mongo` for the first three.
+        # No CONDUIT_PG_URL / CONDUIT_REDIS_URL / CONDUIT_MONGO_URL /
+        # CONDUIT_NEO4J_URI / Docker here — the Phase 19.6 `pg_backend`,
+        # Phase 22.5 `redis_backend`, Phase 23.5 `mongo_backend`, and Phase
+        # 24.6 `neo4j_backend` suites, and the Phase 21.6 `#[cfg(unix)]` UDS
+        # test, skip or don't compile (Windows) accordingly. See
+        # `test-postgres` / `test-redis` / `test-mongo` / `test-neo4j` for
+        # the first four.
 
   test-postgres:
     name: test (postgres)
@@ -123,6 +125,32 @@ jobs:
         env:
           CONDUIT_MONGO_URL: mongodb://localhost:27017/?directConnection=true
           CONDUIT_MONGO_DB: conduit_ci
+
+  test-neo4j:
+    name: test (neo4j)
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/conduit-test
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p conduit-test 'RETURN 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p conduit-core --test neo4j_backend
+        run: cargo test -p conduit-core --test neo4j_backend
+        env:
+          CONDUIT_NEO4J_URI: bolt://localhost:7687
+          CONDUIT_NEO4J_USER: neo4j
+          CONDUIT_NEO4J_PASSWORD: conduit-test
 
   msrv:
     name: MSRV (1.88)

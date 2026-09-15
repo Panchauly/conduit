@@ -14,6 +14,13 @@ pub enum GraphError {
     /// Failed to write the record / guard / incident index to storage.
     WriteFailed(String),
 
+    /// Phase 24.3: a backend's optimistic CAS (Neo4j's guard-node
+    /// `WHERE`-conditioned `SET`, inside a transaction) was aborted by a
+    /// concurrent writer. Retryable — the caller re-runs the whole
+    /// read-decide-write cycle from scratch against a freshly re-read guard,
+    /// not returned as a hard failure.
+    WriteConflict,
+
     /// No upcaster chain from the event's version to the mapping's target version.
     UnsupportedVersion {
         event_type: String,
@@ -34,6 +41,9 @@ impl fmt::Display for GraphError {
             }
             GraphError::WriteFailed(msg) => {
                 write!(f, "graph write failed: {}", msg)
+            }
+            GraphError::WriteConflict => {
+                write!(f, "graph write conflict: guard changed concurrently")
             }
             GraphError::UnsupportedVersion {
                 event_type,
