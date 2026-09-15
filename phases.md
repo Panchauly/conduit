@@ -35,19 +35,19 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 21 | OSS Release Readiness (21.1–21.6) | ✅ Completed | [phases/phase-21-oss-release-readiness.md](phases/phase-21-oss-release-readiness.md) |
 | 22 | Redis Key-Value Backend (22.1–22.5) | ✅ Completed | [phases/phase-22-redis-kv-backend.md](phases/phase-22-redis-kv-backend.md) |
 | 23 | MongoDB Document Backend (23.1–23.5) | ✅ Completed | [phases/phase-23-mongodb-document-backend.md](phases/phase-23-mongodb-document-backend.md) |
+| 24 | Neo4j Graph Backend (24.1–24.6) | ✅ Completed | [phases/phase-24-neo4j-graph-backend.md](phases/phase-24-neo4j-graph-backend.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md) · Engine/producer boundary: [phases/producer-contract.md](phases/producer-contract.md)
 
 ---
 
-## Beyond Phase 23
+## Beyond Phase 24
 
-All four storage kinds from the project pitch exist (Phases 11–16, file-backed, one `decide()` core), the symmetric source side exists (Phase 17), the debt from that run is paid down (Phase 18), the SQL sink is production-real on Postgres (Phase 19), the technology-agnostic producer contract is defined (Phase 20), the repo is licensed, CI-gated, documented, and example-driven for a stranger to pick up (Phase 21), the key-value sink has a real backend on Redis (Phase 22), and the document sink has a real, genuinely ACID backend on MongoDB (Phase 23) — all three behind the same `decide()`/guard model. Conduit is **projection-only** and structured in three parts with distinct dependency rules ([`architecture.md` §1.1–1.4](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
+All four storage kinds now have a real database backend, not just a file-backed default — SQL on SQLite and Postgres (Phase 19), key-value on Redis (Phase 22), document on MongoDB (Phase 23), and graph on Neo4j (Phase 24), every one of them behind the exact same `decide()`/guard model as the file adapters. Combined with the symmetric source side (Phase 17), the technology-agnostic producer contract (Phase 20), and OSS release readiness (Phase 21), this is the complete `architecture.md` §1.4 pitch: **the open-source engine holds every real backend, not a limited edition of one.** Conduit is **projection-only** and structured in three parts with distinct dependency rules ([`architecture.md` §1.1–1.4](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
 
 Candidate future work, not yet planned in detail:
 
-- **Later OSS backends** — a Neo4j/Cypher graph backend (the last file-backed kind still single-implementation).
 - **Pro modules** — native Kafka / Kinesis `EventSource` implementations, a distributed multi-node coordinator, compliance/audit encryption adapters, a visual `conduit explain` topology UI ([`architecture.md` §1.4](architecture.md)).
-- **`conduit-core` dependency weight** — Phase 19 (`postgres`/`tokio`), Phase 20 (nothing, `tonic` is isolated in `conduit-ingest`), Phase 22 (`redis`, a sync client like `postgres`), and Phase 23 (`mongodb`, its own internally-pooled client, no r2d2) mean the embeddable crate now pulls in several drivers transitively; a feature gate to drop unused backends for lean embedded use is open.
+- **`conduit-core` dependency weight** — Phase 19 (`postgres`/`tokio`), Phase 20 (nothing, `tonic` is isolated in `conduit-ingest`), Phase 22 (`redis`), Phase 23 (`mongodb`, its own internally-pooled client, no r2d2), and Phase 24 (`neo4rs` plus an internal `tokio::runtime::Runtime`, the same async-wrapped-in-sync pattern as Postgres) mean the embeddable crate now pulls in every one of these drivers transitively; a feature gate to drop unused backends for lean embedded use is open.
 - **Subgraph-per-event** — one mapping emitting several graph records atomically (deferred out of Phase 16).
 - **TTL for the KV adapters** — deferred out of Phase 14/22 for replay-determinism reasons (time-based eviction isn't reproducible from a replayed log).

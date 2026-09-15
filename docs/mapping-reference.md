@@ -131,7 +131,12 @@ value:
 ## Graph (`mappings/graph/*.yaml`)
 
 A graph mapping is a `kind`-tagged union: exactly one of `node` or `edge`
-per mapping file.
+per mapping file. The identical mapping file routes to either graph backend
+— `graph` (file-backed) or `neo4j` (Phase 24) — chosen by which adapter
+`routing.json` points the event type at. On Neo4j, `label`/`edge_type`
+become the node label / relationship type directly, `properties` become the
+record's properties, and a node's `key` (or an edge's resolved identity)
+becomes its `id` property.
 
 **`kind: node`** — a node *is* an entity, so facets apply the same as SQL/document/KV:
 

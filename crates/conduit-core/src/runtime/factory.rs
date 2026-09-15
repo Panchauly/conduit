@@ -7,6 +7,7 @@ use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::document::mongo::MongoDbAdapter;
 use crate::adapter::document::runtime::DocumentRuntimeBuilder;
 use crate::adapter::graph::mapping::GraphMapping;
+use crate::adapter::graph::neo4j::Neo4jAdapter;
 use crate::adapter::graph::runtime::GraphRuntimeBuilder;
 use crate::adapter::graph::store::GraphStore;
 use crate::adapter::keyvalue::mapping::KvMapping;
@@ -125,6 +126,23 @@ pub fn build_adapters_from_config(
                     &url,
                     cfg.config.database.clone(),
                     cfg.config.pool_size.unwrap_or(4),
+                    cfg.priority,
+                    builder,
+                    Arc::clone(&upcasters),
+                    config.migration_policy,
+                )));
+            }
+
+            AdapterConfig::Neo4j(cfg) => {
+                let builder = GraphRuntimeBuilder::new(graph_mappings.clone());
+                let uri = crate::runtime::config::expand_env(&cfg.config.uri);
+                let password = crate::runtime::config::expand_env(&cfg.config.password);
+                adapters.push(Box::new(Neo4jAdapter::new(
+                    cfg.id.clone(),
+                    &uri,
+                    &cfg.config.user,
+                    &password,
+                    cfg.config.database.clone(),
                     cfg.priority,
                     builder,
                     Arc::clone(&upcasters),

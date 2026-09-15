@@ -174,6 +174,9 @@ pub enum AdapterConfig {
 
     #[serde(rename = "mongodb")]
     MongoDb(MongoDbAdapterConfig),
+
+    #[serde(rename = "neo4j")]
+    Neo4j(Neo4jAdapterConfig),
 }
 
 #[derive(Debug, Deserialize)]
@@ -328,6 +331,33 @@ pub struct MongoDbConfig {
     pub pool_size: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Neo4jAdapterConfig {
+    pub id: String,
+    pub priority: u32,
+    pub config: Neo4jConfig,
+
+    #[serde(default)]
+    pub capabilities: Option<AdapterCapabilities>,
+
+    #[serde(default)]
+    pub depends_on: Vec<AdapterId>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Neo4jConfig {
+    /// Bolt URI (`bolt://host:port` or `neo4j://host:port`). May contain
+    /// `${ENV_VAR}` references (Phase 19.2 pattern, reused as-is).
+    pub uri: String,
+    pub user: String,
+    /// May contain `${ENV_VAR}` references so credentials stay out of the
+    /// committed config.
+    pub password: String,
+    /// Defaults to Neo4j's own default database when omitted.
+    #[serde(default)]
+    pub database: Option<String>,
+}
+
 /// Expand `${VAR}` references against the process environment. An unset
 /// variable is left literally in place (surfaces as a connection error rather
 /// than a silent empty string).
@@ -460,6 +490,7 @@ impl AdapterConfig {
             AdapterConfig::Postgres(cfg) => &cfg.id,
             AdapterConfig::Redis(cfg) => &cfg.id,
             AdapterConfig::MongoDb(cfg) => &cfg.id,
+            AdapterConfig::Neo4j(cfg) => &cfg.id,
         }
     }
 
@@ -472,6 +503,7 @@ impl AdapterConfig {
             AdapterConfig::Postgres(cfg) => cfg.priority,
             AdapterConfig::Redis(cfg) => cfg.priority,
             AdapterConfig::MongoDb(cfg) => cfg.priority,
+            AdapterConfig::Neo4j(cfg) => cfg.priority,
         }
     }
 
@@ -485,6 +517,7 @@ impl AdapterConfig {
             AdapterConfig::Postgres(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Redis(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::MongoDb(cfg) => cfg.capabilities.as_deref(),
+            AdapterConfig::Neo4j(cfg) => cfg.capabilities.as_deref(),
         }
     }
 
@@ -497,6 +530,7 @@ impl AdapterConfig {
             AdapterConfig::Postgres(cfg) => &cfg.depends_on,
             AdapterConfig::Redis(cfg) => &cfg.depends_on,
             AdapterConfig::MongoDb(cfg) => &cfg.depends_on,
+            AdapterConfig::Neo4j(cfg) => &cfg.depends_on,
         }
     }
 }
