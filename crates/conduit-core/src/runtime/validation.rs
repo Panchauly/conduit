@@ -56,6 +56,11 @@ pub enum ValidationIssue {
         adapter_id: String,
         reason: String,
     },
+    /// Phase 25.3: a MySQL adapter's connection config is unusable.
+    InvalidMySqlConfig {
+        adapter_id: String,
+        reason: String,
+    },
     UnknownAdapter {
         event_type: String,
         adapter_id: String,
@@ -218,6 +223,13 @@ impl fmt::Display for ValidationIssue {
                 write!(
                     f,
                     "invalid neo4j adapter {:?} config: {}",
+                    adapter_id, reason
+                )
+            }
+            ValidationIssue::InvalidMySqlConfig { adapter_id, reason } => {
+                write!(
+                    f,
+                    "invalid mysql adapter {:?} config: {}",
                     adapter_id, reason
                 )
             }
@@ -503,10 +515,13 @@ fn build_adapter_by_id<'a>(
     map
 }
 
-/// Any SQL backend (Phase 19) — SQLite or Postgres. Both consume `SqlMapping`s
-/// and share the mapping-coverage / capability rules.
+/// Any SQL backend (Phase 19, 25.3) — SQLite, Postgres, or MySQL. All consume
+/// `SqlMapping`s and share the mapping-coverage / capability rules.
 fn is_sql(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::Sqlite(_) | AdapterConfig::Postgres(_))
+    matches!(
+        a,
+        AdapterConfig::Sqlite(_) | AdapterConfig::Postgres(_) | AdapterConfig::MySql(_)
+    )
 }
 
 /// Any document backend (Phase 23) — the file-backed store or MongoDB. Both
@@ -880,6 +895,25 @@ pub fn validate_projection_config(
                         reason: format!("`uri` does not parse: {uri}"),
                     });
                 }
+            }
+        }
+    }
+
+    // Phase 25.3: a MySQL adapter's `url` must be non-empty and parse.
+    // `mysql::Opts::from_url` validates scheme/host without connecting.
+    for a in &config.adapters {
+        if let AdapterConfig::MySql(cfg) = a {
+            let url = crate::runtime::config::expand_env(&cfg.config.url);
+            if url.trim().is_empty() {
+                report.push(ValidationIssue::InvalidMySqlConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: "`url` is empty".into(),
+                });
+            } else if ::mysql::Opts::from_url(&url).is_err() {
+                report.push(ValidationIssue::InvalidMySqlConfig {
+                    adapter_id: cfg.id.clone(),
+                    reason: format!("`url` does not parse: {url}"),
+                });
             }
         }
     }

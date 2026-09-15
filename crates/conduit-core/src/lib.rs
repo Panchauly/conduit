@@ -61,6 +61,11 @@ pub use runtime::{
     validate_routing_for_event_type,
 };
 
+/// Phase 25.2: register a factory for a custom (non-built-in) `AdapterConfig`
+/// `type:`, so a community connector crate plugs into `type: <name>` in the
+/// YAML config exactly like a built-in adapter.
+pub use runtime::register_adapter_factory;
+
 /// Execution report types (also at [crate root](crate) for convenience).
 pub mod report {
     pub use crate::execution::{

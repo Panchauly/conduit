@@ -636,6 +636,7 @@ fn format_storage_kind(kind: StorageKind) -> &'static str {
         StorageKind::Document => "document",
         StorageKind::KeyValue => "keyvalue",
         StorageKind::Graph => "graph",
+        StorageKind::Custom => "custom",
     }
 }
 

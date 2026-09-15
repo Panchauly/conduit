@@ -34,13 +34,18 @@ pub struct SqlWrite {
     pub set_columns: Vec<String>,
 }
 
-/// Placeholder style — the one real dialect branch (Phase 19.1).
+/// Placeholder style — originally the one real dialect branch (Phase 19.1);
+/// as of Phase 25.3 it also picks the upsert clause, since MySQL has no
+/// `ON CONFLICT` at all (see [`SqlWrite::render`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placeholders {
     /// SQLite: `?1, ?2, …`
     Question,
     /// Postgres: `$1, $2, …`
     Dollar,
+    /// MySQL: bare, unnumbered `?` — the wire protocol has no numbered-
+    /// placeholder syntax, params bind purely by position (Phase 25.3).
+    MySql,
 }
 
 impl Placeholders {
@@ -48,14 +53,17 @@ impl Placeholders {
         match self {
             Placeholders::Question => format!("?{i}"),
             Placeholders::Dollar => format!("${i}"),
+            Placeholders::MySql => "?".to_string(),
         }
     }
 }
 
 impl SqlWrite {
-    /// Render the `INSERT [… ON CONFLICT …]` statement text. `ON CONFLICT (…)
-    /// DO UPDATE SET …` is byte-identical between SQLite and Postgres — only
-    /// the placeholder tokens differ.
+    /// Render the `INSERT [… upsert …]` statement text. `ON CONFLICT (…) DO
+    /// UPDATE SET …` is byte-identical between SQLite and Postgres — only the
+    /// placeholder tokens differ. MySQL (Phase 25.3) has no `ON CONFLICT` at
+    /// all: its upsert clause is `ON DUPLICATE KEY UPDATE`, keyed off the
+    /// table's own primary key rather than a stated `conflict_target`.
     pub fn render(&self, ph: Placeholders) -> String {
         let cols = self.columns.join(", ");
         let vals = (1..=self.columns.len())
@@ -64,17 +72,30 @@ impl SqlWrite {
             .join(", ");
         let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", self.table, cols, vals);
         if !self.conflict_target.is_empty() {
-            let set = self
-                .set_columns
-                .iter()
-                .map(|c| format!("{c} = excluded.{c}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            sql.push_str(&format!(
-                " ON CONFLICT ({}) DO UPDATE SET {}",
-                self.conflict_target.join(", "),
-                set
-            ));
+            match ph {
+                Placeholders::MySql => {
+                    let set = self
+                        .set_columns
+                        .iter()
+                        .map(|c| format!("{c} = VALUES({c})"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    sql.push_str(&format!(" ON DUPLICATE KEY UPDATE {set}"));
+                }
+                Placeholders::Question | Placeholders::Dollar => {
+                    let set = self
+                        .set_columns
+                        .iter()
+                        .map(|c| format!("{c} = excluded.{c}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    sql.push_str(&format!(
+                        " ON CONFLICT ({}) DO UPDATE SET {}",
+                        self.conflict_target.join(", "),
+                        set
+                    ));
+                }
+            }
         }
         sql
     }
@@ -98,6 +119,45 @@ pub struct GuardRow {
 
 /// One backend's transaction. Everything a driver genuinely must own — nothing
 /// about *when* to write or *what* to decide (that is [`project`]).
+///
+/// **Public extension surface (Phase 25.1).** Implement this trait for a
+/// SQL-flavored store Conduit doesn't ship and every SQL mapping feature —
+/// facets, deletes, tombstones, resurrection — works for free; the trait is
+/// the entire contract. MySQL ([`super::mysql::MySqlTxn`], Phase 25.3) is
+/// itself a worked example of implementing this trait fresh, not just a
+/// built-in — nothing about it is special-cased outside this file. A
+/// breaking change to this trait is a breaking change to `conduit-core`,
+/// tracked deliberately (pre-1.0, semver still allows it, but not silently).
+///
+/// **The atomicity contract.** `ensure_guard_table` through `commit` all run
+/// against the *same* underlying transaction: the guard read
+/// (`read_guard_lane`), the target write (`execute_write`/`delete_row`), and
+/// the guard write (`upsert_guard_row`/`bump_guard_lane`/`cascade_facets`)
+/// must be indivisible from the perspective of any other writer — either all
+/// of them land, or none do. Concretely, per built-in backend:
+/// - **SQLite** ([`super::sqlite::SqliteTxn`]): a single-writer assumption
+///   (SQLite serializes writers itself) plus a real `rusqlite::Transaction`;
+///   `lock` on `read_guard_lane` is a no-op.
+/// - **Postgres** ([`super::postgres::PostgresTxn`]): a real
+///   `READ COMMITTED` transaction with `SELECT … FOR UPDATE` on the guard
+///   row when `lock` is set (Phase 19.4) — genuine multi-writer safety via a
+///   pessimistic lock, not a retry loop.
+/// - **MySQL** ([`super::mysql::MySqlTxn`]): the same pessimistic-lock shape
+///   as Postgres — a `REPEATABLE READ` transaction with `SELECT … FOR UPDATE`
+///   on the guard row (InnoDB supports it identically) — over a driver with a
+///   looser wire protocol, so it skips Postgres's column-type introspection
+///   and binds JSON scalars by their own Rust type instead (Phase 25.3).
+///
+/// **This seam has no built-in retry path** — unlike the KV/Document/Graph
+/// traits below, `SqlError` carries no "someone else changed this, retry"
+/// variant, and [`project`] never retries. A new backend needs a real
+/// pessimistic lock reachable from a client transaction (`SELECT … FOR
+/// UPDATE` or equivalent) to be safe under concurrent writers; a store
+/// without one is only safe under this trait's single-writer assumption
+/// (SQLite's own fallback). A backend needing optimistic retry instead would
+/// have to extend `SqlError` with a conflict variant and add a retry loop
+/// around its own `handle()` — the pattern `KvBackend`'s Redis
+/// implementation and `GraphBackend`'s Neo4j implementation both use.
 pub trait SqlTxn: Sized {
     /// `CREATE TABLE IF NOT EXISTS conduit_projection_state (…)` — Phase 11.2 /
     /// 13.2 / 15.2 shape, in the backend's own DDL.
