@@ -77,6 +77,34 @@ impl GraphGuard {
 /// One backend's read/write surface for graph records. Everything a driver
 /// genuinely must own — nothing about *when* to write or *what* to decide
 /// (that is [`project_node`] / [`project_edge`]).
+///
+/// **Public extension surface (Phase 25.1).** Implement this trait for a
+/// graph store Conduit doesn't ship (JanusGraph, ArangoDB, etc.) and every
+/// graph mapping feature — node/edge facets, deletes, tombstones, detach-delete
+/// cascades — works for free. A breaking change to this trait is a breaking
+/// change to `conduit-core`, tracked deliberately.
+///
+/// **The atomicity contract.** `write_node`/`write_edge`/`delete_*` must
+/// apply the record and the guard together, indivisibly. This is the
+/// flattest of the four guard shapes by necessity, not by choice — see
+/// [`GraphGuard`]'s own doc comment for why. Two shapes satisfy the contract
+/// in the built-in backends:
+/// - **File** ([`super::store`]): a single-writer assumption plus
+///   write-to-temp-then-rename, with an explicit incident-edge index kept
+///   alongside (Phase 16.2) since the filesystem has no graph structure of
+///   its own to query.
+/// - **Neo4j** ([`super::neo4j`]): one client-session transaction per event,
+///   with an **explicit optimistic CAS** — a `WHERE`-conditioned `SET` on
+///   the guard, re-checked against the *current* stored sequence at write
+///   time — because Neo4j's per-node write locks alone do **not** prevent a
+///   transaction from committing data it read before a concurrent writer
+///   committed (unlike MongoDB's snapshot-isolated transactions). Zero rows
+///   returned means the CAS lost; map that to `Err(GraphError::WriteConflict)`
+///   and let the caller (`Neo4jAdapter::handle()`) retry the whole
+///   transaction, bounded. A backend targeting a genuinely serializable /
+///   snapshot-isolated store can skip the manual CAS and rely on the
+///   transaction's own conflict detection instead, the way MongoDB does —
+///   but verify that guarantee for the specific store before assuming it.
 pub trait GraphBackend {
     /// Read a node's whole guard (all facet lanes). `Ok(None)` means this
     /// node has never been projected here.

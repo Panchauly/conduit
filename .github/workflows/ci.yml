@@ -38,12 +38,12 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
         # No CONDUIT_PG_URL / CONDUIT_REDIS_URL / CONDUIT_MONGO_URL /
-        # CONDUIT_NEO4J_URI / Docker here — the Phase 19.6 `pg_backend`,
-        # Phase 22.5 `redis_backend`, Phase 23.5 `mongo_backend`, and Phase
-        # 24.6 `neo4j_backend` suites, and the Phase 21.6 `#[cfg(unix)]` UDS
-        # test, skip or don't compile (Windows) accordingly. See
-        # `test-postgres` / `test-redis` / `test-mongo` / `test-neo4j` for
-        # the first four.
+        # CONDUIT_NEO4J_URI / CONDUIT_MYSQL_URL / Docker here — the Phase 19.6
+        # `pg_backend`, Phase 22.5 `redis_backend`, Phase 23.5 `mongo_backend`,
+        # Phase 24.6 `neo4j_backend`, and Phase 25.3 `mysql_backend` suites,
+        # and the Phase 21.6 `#[cfg(unix)]` UDS test, skip or don't compile
+        # (Windows) accordingly. See `test-postgres` / `test-redis` /
+        # `test-mongo` / `test-neo4j` / `test-mysql` for the first five.
 
   test-postgres:
     name: test (postgres)
@@ -151,6 +151,31 @@ jobs:
           CONDUIT_NEO4J_URI: bolt://localhost:7687
           CONDUIT_NEO4J_USER: neo4j
           CONDUIT_NEO4J_PASSWORD: conduit-test
+
+  test-mysql:
+    name: test (mysql)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_DATABASE: conduit_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p conduit-core --test mysql_backend
+        run: cargo test -p conduit-core --test mysql_backend
+        env:
+          CONDUIT_MYSQL_URL: mysql://root@localhost:3306/conduit_ci
 
   msrv:
     name: MSRV (1.88)

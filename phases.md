@@ -36,18 +36,20 @@ Full detail for each phase lives in [`phases/`](phases/) — this file is an ind
 | 22 | Redis Key-Value Backend (22.1–22.5) | ✅ Completed | [phases/phase-22-redis-kv-backend.md](phases/phase-22-redis-kv-backend.md) |
 | 23 | MongoDB Document Backend (23.1–23.5) | ✅ Completed | [phases/phase-23-mongodb-document-backend.md](phases/phase-23-mongodb-document-backend.md) |
 | 24 | Neo4j Graph Backend (24.1–24.6) | ✅ Completed | [phases/phase-24-neo4j-graph-backend.md](phases/phase-24-neo4j-graph-backend.md) |
+| 25 | Backend Extension API & Community Connectors (25.1–25.5) | ✅ Completed | [phases/phase-25-backend-extension-api.md](phases/phase-25-backend-extension-api.md) |
 
 Cross-cutting principles: [phases/design-principles.md](phases/design-principles.md) · Engine/producer boundary: [phases/producer-contract.md](phases/producer-contract.md)
 
 ---
 
-## Beyond Phase 24
+## Beyond Phase 25
 
-All four storage kinds now have a real database backend, not just a file-backed default — SQL on SQLite and Postgres (Phase 19), key-value on Redis (Phase 22), document on MongoDB (Phase 23), and graph on Neo4j (Phase 24), every one of them behind the exact same `decide()`/guard model as the file adapters. Combined with the symmetric source side (Phase 17), the technology-agnostic producer contract (Phase 20), and OSS release readiness (Phase 21), this is the complete `architecture.md` §1.4 pitch: **the open-source engine holds every real backend, not a limited edition of one.** Conduit is **projection-only** and structured in three parts with distinct dependency rules ([`architecture.md` §1.1–1.4](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
+All four storage kinds now have a real database backend, not just a file-backed default — SQL on SQLite, Postgres, and MySQL (Phases 19, 25), key-value on Redis (Phase 22), document on MongoDB (Phase 23), and graph on Neo4j (Phase 24), every one of them behind the exact same `decide()`/guard model as the file adapters. Combined with the symmetric source side (Phase 17), the technology-agnostic producer contract (Phase 20), OSS release readiness (Phase 21), and now a public, documented extension point (`SqlTxn`/`KvBackend`/`DocumentBackend`/`GraphBackend` plus `register_adapter_factory`, Phase 25) so a community connector for a store Conduit doesn't ship can plug in without forking the crate, this is the complete `architecture.md` §1.4 pitch: **the open-source engine holds every real backend, not a limited edition of one, and growing that set doesn't require the core team.** Conduit is **projection-only** and structured in three parts with distinct dependency rules ([`architecture.md` §1.1–1.4](architecture.md), [`phases/producer-contract.md`](phases/producer-contract.md)).
 
 Candidate future work, not yet planned in detail:
 
 - **Pro modules** — native Kafka / Kinesis `EventSource` implementations, a distributed multi-node coordinator, compliance/audit encryption adapters, a visual `conduit explain` topology UI ([`architecture.md` §1.4](architecture.md)).
-- **`conduit-core` dependency weight** — Phase 19 (`postgres`/`tokio`), Phase 20 (nothing, `tonic` is isolated in `conduit-ingest`), Phase 22 (`redis`), Phase 23 (`mongodb`, its own internally-pooled client, no r2d2), and Phase 24 (`neo4rs` plus an internal `tokio::runtime::Runtime`, the same async-wrapped-in-sync pattern as Postgres) mean the embeddable crate now pulls in every one of these drivers transitively; a feature gate to drop unused backends for lean embedded use is open.
+- **`conduit-core` dependency weight** — Phase 19 (`postgres`/`tokio`), Phase 20 (nothing, `tonic` is isolated in `conduit-ingest`), Phase 22 (`redis`), Phase 23 (`mongodb`, its own internally-pooled client, no r2d2), Phase 24 (`neo4rs` plus an internal `tokio::runtime::Runtime`, the same async-wrapped-in-sync pattern as Postgres), and Phase 25 (`mysql`, a fifth driver, first-party by explicit product decision — see phase 25's "As built" notes) mean the embeddable crate now pulls in every one of these drivers transitively; a feature gate to drop unused backends for lean embedded use is open.
 - **Subgraph-per-event** — one mapping emitting several graph records atomically (deferred out of Phase 16).
 - **TTL for the KV adapters** — deferred out of Phase 14/22 for replay-determinism reasons (time-based eviction isn't reproducible from a replayed log).
+- **A real out-of-tree community connector** — Phase 25 built and proved the extension point (traits, registry, guide) using an in-tree MySQL backend as the worked example; an actual independent crate (`conduit-dynamodb`, `conduit-elasticsearch`, …) exercising the registry from outside this repo is still open.

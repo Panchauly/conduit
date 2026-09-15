@@ -16,6 +16,11 @@ pub enum StorageKind {
     Document,
     KeyValue,
     Graph,
+    /// Phase 25.2: reported only by the internal `FailedAdapter` placeholder
+    /// pushed for an `AdapterConfig::Custom` whose `type:` has no factory
+    /// registered at build time — never by a real (built-in or registered)
+    /// adapter, which always reports one of the four kinds above.
+    Custom,
 }
 
 pub type AdapterId = String;
@@ -27,6 +32,7 @@ impl fmt::Display for StorageKind {
             StorageKind::Document => "document",
             Self::KeyValue => "keyvalue",
             Self::Graph => "graph",
+            Self::Custom => "custom",
         };
         write!(f, "{s}")
     }

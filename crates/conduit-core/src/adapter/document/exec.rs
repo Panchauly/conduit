@@ -79,6 +79,30 @@ impl ProjectionGuard {
 /// One backend's read/write surface for a single `(collection, entity_id)`
 /// entity. Everything a driver genuinely must own — nothing about *when* to
 /// write or *what* to decide (that is [`project`]).
+///
+/// **Public extension surface (Phase 25.1).** Implement this trait for a
+/// document store Conduit doesn't ship (Elasticsearch, CouchDB, etc.) and
+/// every document mapping feature — facets, deletes, tombstones,
+/// resurrection — works for free. A breaking change to this trait is a
+/// breaking change to `conduit-core`, tracked deliberately.
+///
+/// **The atomicity contract.** `write`/`delete` must apply the document (or
+/// facet) and the guard together, indivisibly. Unlike the KV trait, a named
+/// facet's merge is **not** done by [`project`] — `write` receives the
+/// facet's own unmerged fields plus the facet name, so a backend that can do
+/// a native partial update (MongoDB's `$set`) doesn't pay for a read it
+/// doesn't need. Two shapes satisfy the atomicity contract in the built-in
+/// backends:
+/// - **File** ([`super::file`]): a single-writer assumption plus
+///   write-to-temp-then-rename for the guard file.
+/// - **MongoDB** ([`super::mongo`]): a real client-session transaction
+///   wraps the guard write and the target-document write together (they're
+///   two different documents in two different collections); a concurrent
+///   writer's commit makes ours fail with a retryable
+///   (`TransientTransactionError`-labeled) error, mapped to
+///   `Err(DocumentError::WriteConflict)`. The caller (`MongoDbAdapter::handle()`)
+///   retries the whole transaction from scratch, bounded — copy that loop
+///   shape for a new transactional backend.
 pub trait DocumentBackend {
     /// Read the whole-entity guard (all facet lanes). `Ok(None)` means this
     /// entity has never been projected here.

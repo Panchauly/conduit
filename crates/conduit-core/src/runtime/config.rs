@@ -4,6 +4,10 @@ use std::collections::HashSet;
 
 use crate::routing::AdapterId;
 
+const KNOWN_ADAPTER_TYPES: &[&str] = &[
+    "sqlite", "file", "keyvalue", "graph", "postgres", "redis", "mongodb", "neo4j", "mysql",
+];
+
 // ------------------------------------------------------------
 // Failure Policy (Phase 6.2)
 // ------------------------------------------------------------
@@ -153,7 +157,7 @@ pub struct RoutingConfig {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-pub enum AdapterConfig {
+enum KnownAdapterConfig {
     #[serde(rename = "sqlite")]
     Sqlite(SqliteAdapterConfig),
 
@@ -177,6 +181,110 @@ pub enum AdapterConfig {
 
     #[serde(rename = "neo4j")]
     Neo4j(Neo4jAdapterConfig),
+
+    #[serde(rename = "mysql")]
+    MySql(MySqlAdapterConfig),
+}
+
+#[derive(Debug)]
+pub enum AdapterConfig {
+    Sqlite(SqliteAdapterConfig),
+    File(FileAdapterConfig),
+    KeyValue(KeyValueAdapterConfig),
+    Graph(GraphAdapterConfig),
+    Postgres(PostgresAdapterConfig),
+    Redis(RedisAdapterConfig),
+    MongoDb(MongoDbAdapterConfig),
+    Neo4j(Neo4jAdapterConfig),
+    MySql(MySqlAdapterConfig),
+
+    /// Phase 25.2: an unrecognized `type:` — resolved against the
+    /// [`crate::runtime::registry`] at `build_adapters_from_config` time, not
+    /// at parse time (a factory may be registered after config parsing but
+    /// before building, per the phase doc).
+    Custom(CustomAdapterConfig),
+}
+
+/// A `type:` this crate doesn't build in, carried opaquely until a registered
+/// factory resolves it. `id`/`priority`/`capabilities`/`depends_on` are
+/// pulled out here too (generically, the same way every built-in variant's
+/// are) so routing/dependency validation works identically before the
+/// adapter is ever built. `raw` is the *entire* adapter list entry — `type`,
+/// `id`, `priority`, `config`, `capabilities`, `depends_on`, all of it — not
+/// just the nested `config:` block: the registry's factory signature (Phase
+/// 25.2's own doc) takes a single `serde_yaml::Value` and nothing else, so
+/// that Value has to be self-sufficient for a factory to build a
+/// self-describing adapter (one whose own `id()`/`priority()` match what's in
+/// the config) from it alone.
+#[derive(Debug, Clone)]
+pub struct CustomAdapterConfig {
+    pub type_name: String,
+    pub id: String,
+    pub priority: u32,
+    pub raw: serde_yaml::Value,
+    pub capabilities: Option<AdapterCapabilities>,
+    pub depends_on: Vec<AdapterId>,
+}
+
+/// Try every built-in `type:` first (via [`KnownAdapterConfig`]'s derived
+/// tagged-enum logic); anything else becomes [`AdapterConfig::Custom`]
+/// instead of a parse error — the Phase 25.2 catch-all.
+impl<'de> Deserialize<'de> for AdapterConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let value = serde_yaml::Value::deserialize(deserializer)?;
+        let type_name = value
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| D::Error::custom("adapter config missing `type` field"))?
+            .to_string();
+
+        if KNOWN_ADAPTER_TYPES.contains(&type_name.as_str()) {
+            return match KnownAdapterConfig::deserialize(value).map_err(D::Error::custom)? {
+                KnownAdapterConfig::Sqlite(c) => Ok(AdapterConfig::Sqlite(c)),
+                KnownAdapterConfig::File(c) => Ok(AdapterConfig::File(c)),
+                KnownAdapterConfig::KeyValue(c) => Ok(AdapterConfig::KeyValue(c)),
+                KnownAdapterConfig::Graph(c) => Ok(AdapterConfig::Graph(c)),
+                KnownAdapterConfig::Postgres(c) => Ok(AdapterConfig::Postgres(c)),
+                KnownAdapterConfig::Redis(c) => Ok(AdapterConfig::Redis(c)),
+                KnownAdapterConfig::MongoDb(c) => Ok(AdapterConfig::MongoDb(c)),
+                KnownAdapterConfig::Neo4j(c) => Ok(AdapterConfig::Neo4j(c)),
+                KnownAdapterConfig::MySql(c) => Ok(AdapterConfig::MySql(c)),
+            };
+        }
+
+        let id = value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| D::Error::custom("adapter config missing `id` field"))?
+            .to_string();
+        let priority = value
+            .get("priority")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| D::Error::custom("adapter config missing `priority` field"))?
+            as u32;
+        let capabilities = match value.get("capabilities") {
+            Some(v) => Some(serde_yaml::from_value(v.clone()).map_err(D::Error::custom)?),
+            None => None,
+        };
+        let depends_on = match value.get("depends_on") {
+            Some(v) => serde_yaml::from_value(v.clone()).map_err(D::Error::custom)?,
+            None => Vec::new(),
+        };
+
+        Ok(AdapterConfig::Custom(CustomAdapterConfig {
+            type_name,
+            id,
+            priority,
+            raw: value,
+            capabilities,
+            depends_on,
+        }))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -358,6 +466,30 @@ pub struct Neo4jConfig {
     pub database: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MySqlAdapterConfig {
+    pub id: String,
+    pub priority: u32,
+    pub config: MySqlConfig,
+
+    #[serde(default)]
+    pub capabilities: Option<AdapterCapabilities>,
+
+    #[serde(default)]
+    pub depends_on: Vec<AdapterId>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MySqlConfig {
+    /// `mysql://user:pass@host:port/db`. May contain `${ENV_VAR}` references
+    /// (Phase 19.2 pattern, reused as-is) so credentials stay out of the
+    /// committed config.
+    pub url: String,
+    /// Connection pool size (default 4).
+    #[serde(default)]
+    pub pool_size: Option<u32>,
+}
+
 /// Expand `${VAR}` references against the process environment. An unset
 /// variable is left literally in place (surfaces as a connection error rather
 /// than a silent empty string).
@@ -439,7 +571,15 @@ pub enum ConfigError {
     DuplicateAdapterId(String),
     DuplicateSourceId(String),
     SelfDependency(String),
-    UnknownDependency { adapter: String, dependency: String },
+    UnknownDependency {
+        adapter: String,
+        dependency: String,
+    },
+    /// Phase 25.2: an `AdapterConfig::Custom`'s `type:` has no factory
+    /// registered for it (yet, or a typo). Surfaced per-adapter via a
+    /// `FailedAdapter` placeholder, not by making `build_adapters_from_config`
+    /// fallible — see `runtime::factory`'s doc comment.
+    UnregisteredAdapterType(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -470,6 +610,13 @@ impl fmt::Display for ConfigError {
                     adapter, dependency
                 )
             }
+            ConfigError::UnregisteredAdapterType(type_name) => {
+                write!(
+                    f,
+                    "no adapter factory registered for type {:?} (call register_adapter_factory before build_adapters_from_config)",
+                    type_name
+                )
+            }
         }
     }
 }
@@ -491,6 +638,8 @@ impl AdapterConfig {
             AdapterConfig::Redis(cfg) => &cfg.id,
             AdapterConfig::MongoDb(cfg) => &cfg.id,
             AdapterConfig::Neo4j(cfg) => &cfg.id,
+            AdapterConfig::MySql(cfg) => &cfg.id,
+            AdapterConfig::Custom(cfg) => &cfg.id,
         }
     }
 
@@ -504,6 +653,8 @@ impl AdapterConfig {
             AdapterConfig::Redis(cfg) => cfg.priority,
             AdapterConfig::MongoDb(cfg) => cfg.priority,
             AdapterConfig::Neo4j(cfg) => cfg.priority,
+            AdapterConfig::MySql(cfg) => cfg.priority,
+            AdapterConfig::Custom(cfg) => cfg.priority,
         }
     }
 
@@ -518,6 +669,8 @@ impl AdapterConfig {
             AdapterConfig::Redis(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::MongoDb(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Neo4j(cfg) => cfg.capabilities.as_deref(),
+            AdapterConfig::MySql(cfg) => cfg.capabilities.as_deref(),
+            AdapterConfig::Custom(cfg) => cfg.capabilities.as_deref(),
         }
     }
 
@@ -531,6 +684,8 @@ impl AdapterConfig {
             AdapterConfig::Redis(cfg) => &cfg.depends_on,
             AdapterConfig::MongoDb(cfg) => &cfg.depends_on,
             AdapterConfig::Neo4j(cfg) => &cfg.depends_on,
+            AdapterConfig::MySql(cfg) => &cfg.depends_on,
+            AdapterConfig::Custom(cfg) => &cfg.depends_on,
         }
     }
 }

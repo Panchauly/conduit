@@ -75,6 +75,29 @@ impl KvGuard {
 /// One backend's read/write surface for a single `(namespace, key)` entity.
 /// Everything a driver genuinely must own — nothing about *when* to write or
 /// *what* to decide (that is [`project`]).
+///
+/// **Public extension surface (Phase 25.1).** Implement this trait for a
+/// key-value store Conduit doesn't ship (DynamoDB, Memcached, etc.) and
+/// every KV mapping feature — facets, deletes, tombstones, resurrection —
+/// works for free. A breaking change to this trait is a breaking change to
+/// `conduit-core`, tracked deliberately.
+///
+/// **The atomicity contract.** `write`/`delete` must apply the value (or
+/// facet merge) and the guard together, indivisibly — either both land or
+/// neither does. Two shapes satisfy this in the built-in backends:
+/// - **File** ([`super::store`]): a single-writer assumption plus
+///   write-to-temp-then-rename for the guard file, so a reader never
+///   observes a half-written guard.
+/// - **Redis** ([`super::redis`]): no transaction with real isolation is
+///   available, so `write`/`delete` use an optimistic `WATCH`/`MULTI`/`EXEC`
+///   pipeline and return `Err(KvError::WriteConflict)` when a concurrent
+///   writer touched the guard first. The caller (the adapter's own
+///   `handle()`) retries the whole read-decide-write cycle, bounded — see
+///   `RedisAdapter::handle()` for the exact loop shape to copy.
+///
+/// A backend with a real ACID transaction (a SQL-flavored KV store, say)
+/// can skip the retry loop entirely and just commit; a backend without one
+/// must implement the retry pattern to stay safe under concurrent writers.
 pub trait KvBackend {
     /// Read the whole-entity guard (all facet lanes). `Ok(None)` means this
     /// key has never been projected here.
