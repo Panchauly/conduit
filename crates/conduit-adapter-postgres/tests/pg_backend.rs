@@ -1,4 +1,5 @@
-//! Phase 19.6: Postgres backend integration scenarios.
+//! Phase 19.6 (moved to this crate in Phase 28): Postgres backend integration
+//! scenarios.
 //!
 //! **Gated on `CONDUIT_PG_URL`** (`postgres://user:pass@host/db`). When it is
 //! unset every test prints a skip line and returns `Ok` — the hermetic SQLite
@@ -9,8 +10,8 @@
 //! Consolidated into one file (rather than the seven the phase doc sketches)
 //! because every scenario shares the same skip guard and fresh-table helper.
 
+use conduit_adapter_postgres::PostgresAdapter;
 use conduit_core::adapter::sql::mapping::SqlMapping;
-use conduit_core::adapter::sql::postgres::PostgresAdapter;
 use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use conduit_core::adapter::sql::sqlite::SqliteAdapter;
 use conduit_core::adapter::{AdapterOutcome, SkipReason, StorageAdapter};

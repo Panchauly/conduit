@@ -214,12 +214,18 @@ pub fn load_project(
 // ---------------------------------------------------------------------------
 
 /// Run a single event through the full pipeline (config, mappings, routing, execution).
+///
+/// `register_backends` runs on the runtime before adapters build — pass
+/// `conduit_backends::register_default_backends` to get every split-out
+/// networked backend (Postgres, ...), or `|_| {}` for none.
 pub fn run(
     config_path: &Path,
     mappings_dir: &Path,
     event_path: &Path,
+    register_backends: impl FnOnce(&mut ConduitRuntime),
 ) -> Result<ExecutionReport, PipelineError> {
-    let mut runtime = ConduitRuntime::load(config_path, mappings_dir)?;
+    let mut runtime =
+        ConduitRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
     let event = load_event(event_path)?;
     Ok(runtime.run_once(event))
 }
@@ -229,8 +235,10 @@ pub fn dry_run(
     config_path: &Path,
     mappings_dir: &Path,
     event_path: &Path,
+    register_backends: impl FnOnce(&mut ConduitRuntime),
 ) -> Result<ExecutionReport, PipelineError> {
-    let mut runtime = ConduitRuntime::load(config_path, mappings_dir)?;
+    let mut runtime =
+        ConduitRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
     let event = load_event(event_path)?;
     Ok(runtime.dry_run_once(event))
 }
@@ -342,8 +350,10 @@ pub fn run_source_loop(
     mappings_dir: &Path,
     opts: &SourceRunOptions,
     stop: &AtomicBool,
+    register_backends: impl FnOnce(&mut ConduitRuntime),
 ) -> Result<SourceRunReport, PipelineError> {
-    let mut runtime = ConduitRuntime::load(config_path, mappings_dir)?;
+    let mut runtime =
+        ConduitRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
     let sources = build_sources(runtime.config(), config_path)?;
     if sources.is_empty() {
         return Err(PipelineError::Mapping(
@@ -360,8 +370,10 @@ pub fn replay(
     mappings_dir: &Path,
     events_path: &Path,
     opts: &ReplayRunOptions,
+    register_backends: impl FnOnce(&mut ConduitRuntime),
 ) -> Result<ReplayReport, PipelineError> {
-    let mut runtime = ConduitRuntime::load(config_path, mappings_dir)?;
+    let mut runtime =
+        ConduitRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
     let mut iter = events_from_path(events_path)?;
     Ok(runtime.replay(&mut iter, opts)?)
 }

@@ -414,14 +414,28 @@ impl std::error::Error for ServeError {}
 /// `poll → dispatch → commit → ack` loop until `stop` is set (SIGINT/SIGTERM).
 /// On shutdown the in-flight batch is committed and acked before the server
 /// stops (Phase 20.4).
+///
+/// `register_backends` runs on the runtime before adapters build — pass
+/// `conduit_backends::register_default_backends` to get every split-out
+/// networked backend (Postgres, ...), or `|_| {}` for none (Phase 28).
 pub fn serve(
     config_path: &std::path::Path,
     mappings_dir: &std::path::Path,
     opts: &ServeOptions,
     stop: &std::sync::atomic::AtomicBool,
+    register_backends: impl FnOnce(&mut conduit_core::ConduitRuntime),
 ) -> Result<conduit_core::SourceRunReport, ServeError> {
     let project = conduit_core::pipeline::load_project(config_path, mappings_dir)
         .map_err(ServeError::Pipeline)?;
+    let mut runtime = conduit_core::ConduitRuntime::from_parts(
+        project.config,
+        project.sql_mappings,
+        project.doc_mappings,
+        project.kv_mappings,
+        project.graph_mappings,
+        project.routing_rules,
+    );
+    register_backends(&mut runtime);
 
     let (server, source) = start("grpc", &opts.listen).map_err(ServeError::Ingest)?;
     if let Some(a) = server.local_addr {
@@ -439,17 +453,7 @@ pub fn serve(
         dlq_dir: opts.dlq_dir.clone(),
     };
 
-    let result = conduit_core::run_sources(
-        &project.config,
-        project.routing_rules,
-        project.sql_mappings,
-        project.doc_mappings,
-        project.kv_mappings,
-        project.graph_mappings,
-        vec![Box::new(source)],
-        &run_opts,
-        stop,
-    );
+    let result = runtime.run_sources(vec![Box::new(source)], &run_opts, stop);
 
     server.shutdown();
     result.map_err(ServeError::Source)

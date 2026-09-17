@@ -36,11 +36,6 @@ pub enum ValidationIssue {
         event: String,
         reason: String,
     },
-    /// Phase 19.5: a Postgres adapter's connection config is unusable.
-    InvalidPostgresConfig {
-        adapter_id: String,
-        reason: String,
-    },
     /// Phase 22.4: a Redis adapter's connection config is unusable.
     InvalidRedisConfig {
         adapter_id: String,
@@ -197,13 +192,6 @@ impl fmt::Display for ValidationIssue {
             }
             ValidationIssue::InvalidGraphMapping { event, reason } => {
                 write!(f, "invalid graph mapping for event {:?}: {}", event, reason)
-            }
-            ValidationIssue::InvalidPostgresConfig { adapter_id, reason } => {
-                write!(
-                    f,
-                    "invalid postgres adapter {:?} config: {}",
-                    adapter_id, reason
-                )
             }
             ValidationIssue::InvalidRedisConfig { adapter_id, reason } => {
                 write!(
@@ -515,18 +503,19 @@ fn build_adapter_by_id<'a>(
     map
 }
 
-/// Any SQL backend (Phase 19, 25.3) — SQLite, Postgres, or MySQL. All consume
-/// `SqlMapping`s and share the mapping-coverage / capability rules.
+/// Any in-tree-typed SQL backend — SQLite or MySQL. All consume `SqlMapping`s
+/// and share the mapping-coverage / capability rules. Phase 28: Postgres
+/// moved to `conduit-adapter-postgres` and resolves via `AdapterConfig::Custom`
+/// instead of a typed variant here, so it no longer participates in this
+/// pre-flight kind check — a kind mismatch for it surfaces at dispatch/build
+/// time instead (see the phase's design note on this trade-off).
 fn is_sql(a: &AdapterConfig) -> bool {
-    matches!(
-        a,
-        AdapterConfig::Sqlite(_) | AdapterConfig::Postgres(_) | AdapterConfig::MySql(_)
-    )
+    matches!(a, AdapterConfig::Sqlite(_) | AdapterConfig::MySql(_))
 }
 
 /// Any document backend (Phase 23) — the file-backed store or MongoDB. Both
 /// consume `DocumentMapping`s and share the mapping-coverage / capability
-/// rules, mirroring `is_sql` (SQLite + Postgres) and `is_keyvalue`
+/// rules, mirroring `is_sql` (SQLite + MySQL) and `is_keyvalue`
 /// (file-backed + Redis).
 fn is_document(a: &AdapterConfig) -> bool {
     matches!(a, AdapterConfig::File(_) | AdapterConfig::MongoDb(_))
@@ -798,25 +787,11 @@ pub fn validate_projection_config(
     let adapters_by_id = build_adapter_by_id(config, &mut report);
     let adapter_meta = adapter_metadata_map(config);
 
-    // Phase 19.5: a Postgres adapter's `url` must be non-empty and parse.
-    // (The 19.3 column-existence check is deferred — it needs a live DB; a
-    // missing column surfaces as a clear `WriteFailed` at run time instead.)
-    for a in &config.adapters {
-        if let AdapterConfig::Postgres(cfg) = a {
-            let url = crate::runtime::config::expand_env(&cfg.config.url);
-            if url.trim().is_empty() {
-                report.push(ValidationIssue::InvalidPostgresConfig {
-                    adapter_id: cfg.id.clone(),
-                    reason: "`url` is empty".into(),
-                });
-            } else if url.parse::<::postgres::Config>().is_err() {
-                report.push(ValidationIssue::InvalidPostgresConfig {
-                    adapter_id: cfg.id.clone(),
-                    reason: format!("`url` does not parse: {url}"),
-                });
-            }
-        }
-    }
+    // Phase 28: Postgres's pre-flight URL-parse check used to live here
+    // (Phase 19.5); it moved into `conduit_adapter_postgres::factory` since
+    // Postgres no longer has a typed `AdapterConfig` variant to match on here
+    // — see the phase's design note on this trade-off (the check still
+    // happens, just at adapter-build time instead of config-validate time).
 
     // Phase 22.4: a Redis adapter's `url` must be non-empty and parse.
     // `redis::Client::open` validates scheme/host without connecting.

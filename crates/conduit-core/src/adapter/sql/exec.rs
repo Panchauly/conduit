@@ -346,9 +346,11 @@ pub fn project<T: SqlTxn>(
 // ---------------------------------------------------------------------------
 
 /// Canonical text form of a JSON scalar for a text-affinity bind (SQLite, and
-/// the fallback for a Postgres `text` column). Postgres typed binding lives in
-/// `postgres.rs`.
-pub(crate) fn scalar_to_string(v: &Value) -> String {
+/// the fallback for a typed column in an external SQL backend). `pub` (not
+/// `pub(crate)`) so a backend crate outside `conduit-core` — e.g.
+/// `conduit-adapter-postgres`/`-mysql` — can reuse it for its own text-column
+/// binding fallback, the same way the in-tree SQLite adapter does.
+pub fn scalar_to_string(v: &Value) -> String {
     crate::adapter::json_scalar_to_string(v)
 }
 

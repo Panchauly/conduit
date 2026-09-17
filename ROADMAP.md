@@ -31,10 +31,11 @@ that's separated from a possible future hosted/managed product.
   independent crate (a DynamoDB or Elasticsearch backend, say) exercising the registry
   from outside this repo is still open. See `docs/writing-a-backend.md` if you want to
   be the one to build it.
-- **`conduit-core` dependency weight** — embedding `conduit-core` currently pulls in
-  every backend's driver (Postgres, MySQL, Redis, MongoDB, Neo4j) transitively, even if
-  an embedding application only uses SQLite. A feature gate to drop unused backends for
-  lean embedded use is open.
+- **`conduit-core` dependency weight** — in progress. Postgres has moved into its own
+  crate (`conduit-adapter-postgres`, wired up by default via `conduit-backends`) and
+  `conduit-core` no longer depends on its driver; embedding `conduit-core` still pulls
+  in MySQL/Redis/MongoDB/Neo4j transitively until each of those gets the same
+  treatment, even if an embedding application only uses SQLite.
 - **Subgraph-per-event** — a single mapping emitting several graph records (a node plus
   its edges) atomically from one event. Currently a graph mapping produces exactly one
   node or one edge; a multi-record event is decomposed into separate events upstream.
