@@ -3,7 +3,7 @@ use conduit_core::adapter::{AdapterError, AdapterResult, StorageAdapter};
 use conduit_core::dispatch::dispatch;
 use conduit_core::event::Event;
 use conduit_core::execution::{AdapterOutcome, ExecutionStatus};
-use conduit_core::routing::{AdapterId, StorageKind, route};
+use conduit_core::routing::{AdapterId, StorageKind, load_routing, route_with_rules};
 use conduit_core::runtime::config::FailurePolicy;
 
 use std::collections::HashMap;
@@ -49,12 +49,13 @@ impl StorageAdapter for TestAdapter {
 // Helpers
 // ------------------------------------------------------------
 
-fn set_test_routing() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+fn test_routing() -> HashMap<String, Vec<AdapterId>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
-        .join("fixtures");
+        .join("fixtures")
+        .join("routing.json");
 
-    std::env::set_current_dir(dir).expect("failed to set test cwd");
+    load_routing(path).expect("routing fixture loads")
 }
 
 fn test_event(event_type: &str) -> Event {
@@ -101,8 +102,6 @@ fn fixture_adapter_meta() -> HashMap<AdapterId, AdapterExecutionMeta> {
 
 #[test]
 fn dispatch_executes_all_targeted_adapters() {
-    set_test_routing();
-
     let event = test_event("UserCreated");
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
@@ -119,7 +118,13 @@ fn dispatch_executes_all_targeted_adapters() {
     ];
 
     let meta = fixture_adapter_meta();
-    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
+    let report = dispatch(
+        &event,
+        &mut adapters,
+        FailurePolicy::FailFast,
+        &test_routing(),
+        &meta,
+    );
 
     assert_eq!(report.adapter_reports.len(), 2);
     assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
@@ -135,11 +140,9 @@ fn dispatch_executes_all_targeted_adapters() {
 
 #[test]
 fn dispatch_stops_on_adapter_failure() {
-    set_test_routing();
-
     let event = test_event("FailingEvent");
 
-    let targets = route(&event).expect("routing table loads from test fixtures");
+    let targets = route_with_rules(&event, &test_routing());
     assert!(!targets.is_empty(), "FailingEvent must be routed");
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
@@ -156,7 +159,13 @@ fn dispatch_stops_on_adapter_failure() {
     ];
 
     let meta = fixture_adapter_meta();
-    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
+    let report = dispatch(
+        &event,
+        &mut adapters,
+        FailurePolicy::FailFast,
+        &test_routing(),
+        &meta,
+    );
 
     assert_eq!(report.adapter_reports.len(), 1);
     assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
@@ -166,8 +175,6 @@ fn dispatch_stops_on_adapter_failure() {
 
 #[test]
 fn dispatch_continue_on_error_runs_all_adapters() {
-    set_test_routing();
-
     let event = test_event("UserCreated");
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
@@ -184,7 +191,13 @@ fn dispatch_continue_on_error_runs_all_adapters() {
     ];
 
     let meta = fixture_adapter_meta();
-    let report = dispatch(&event, &mut adapters, FailurePolicy::ContinueOnError, &meta);
+    let report = dispatch(
+        &event,
+        &mut adapters,
+        FailurePolicy::ContinueOnError,
+        &test_routing(),
+        &meta,
+    );
 
     assert_eq!(report.adapter_reports.len(), 2);
     assert_eq!(report.adapter_reports[0].outcome, AdapterOutcome::Failed);
@@ -194,8 +207,6 @@ fn dispatch_continue_on_error_runs_all_adapters() {
 
 #[test]
 fn dispatch_only_runs_routed_adapters() {
-    set_test_routing();
-
     let event = test_event("UserCreated");
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
@@ -217,7 +228,13 @@ fn dispatch_only_runs_routed_adapters() {
     ];
 
     let meta = fixture_adapter_meta();
-    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
+    let report = dispatch(
+        &event,
+        &mut adapters,
+        FailurePolicy::FailFast,
+        &test_routing(),
+        &meta,
+    );
 
     // routing.json selects only Sql + Document
     assert_eq!(report.adapter_reports.len(), 2);
@@ -231,7 +248,6 @@ fn dispatch_only_runs_routed_adapters() {
 
 #[test]
 fn dispatch_runs_dependency_before_dependent() {
-    set_test_routing();
     let event = test_event("UserCreated");
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
         Box::new(TestAdapter {
@@ -253,14 +269,19 @@ fn dispatch_runs_dependency_before_dependent() {
             depends_on: vec!["sql-primary".into()],
         },
     );
-    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
+    let report = dispatch(
+        &event,
+        &mut adapters,
+        FailurePolicy::FailFast,
+        &test_routing(),
+        &meta,
+    );
     assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
     assert_eq!(report.adapter_reports[1].adapter_id, "doc-readmodel");
 }
 
 #[test]
 fn dispatch_cycle_yields_failed_report_not_panic() {
-    set_test_routing();
     let event = test_event("UserCreated");
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
         Box::new(TestAdapter {
@@ -289,7 +310,13 @@ fn dispatch_cycle_yields_failed_report_not_panic() {
             depends_on: vec!["sql-primary".into()],
         },
     );
-    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
+    let report = dispatch(
+        &event,
+        &mut adapters,
+        FailurePolicy::FailFast,
+        &test_routing(),
+        &meta,
+    );
     assert_eq!(report.status, ExecutionStatus::Failed);
     assert_eq!(report.adapter_reports.len(), 1);
     assert_eq!(report.adapter_reports[0].adapter_id, "_dispatch");

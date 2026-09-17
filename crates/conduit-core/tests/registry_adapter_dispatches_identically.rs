@@ -21,18 +21,19 @@ use conduit_core::adapter::{AdapterResult, StorageAdapter};
 use conduit_core::event::Event;
 use conduit_core::execution::{AdapterOutcome, ExecutionStatus};
 use conduit_core::register_adapter_factory;
-use conduit_core::routing::StorageKind;
+use conduit_core::routing::{AdapterId, StorageKind, load_routing};
 use conduit_core::runtime::build_adapters_from_config;
 use conduit_core::runtime::config::{
     AdapterConfig, ConduitConfig, CustomAdapterConfig, FileAdapterConfig, FileConfig, RoutingConfig,
 };
 use conduit_core::runtime::{AdapterExecutionMeta, adapter_metadata_map};
 
-fn set_test_routing() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+fn test_routing() -> HashMap<String, Vec<AdapterId>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
-        .join("fixtures");
-    std::env::set_current_dir(dir).expect("failed to set test cwd");
+        .join("fixtures")
+        .join("routing.json");
+    load_routing(path).expect("routing fixture loads")
 }
 
 /// A trivial adapter a registered factory hands back — proof the registry
@@ -85,8 +86,6 @@ document:
 
 #[test]
 fn registered_adapter_participates_identically_in_dependency_order_and_dispatch() {
-    set_test_routing();
-
     let type_name = "test-mock-sql-25-5";
     let invoked = Arc::new(AtomicBool::new(false));
     let invoked_in_factory = Arc::clone(&invoked);
@@ -170,6 +169,7 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
         &user_created_event(),
         &mut adapters,
         config.failure_policy,
+        &test_routing(),
         &meta,
     );
 
@@ -185,8 +185,6 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
 
 #[test]
 fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
-    set_test_routing();
-
     let config = ConduitConfig {
         version: 1,
         routing: RoutingConfig {
@@ -230,8 +228,13 @@ fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
         version: 1,
         sequence: 1,
     };
-    let report =
-        conduit_core::dispatch::dispatch(&cache_event, &mut adapters, config.failure_policy, &meta);
+    let report = conduit_core::dispatch::dispatch(
+        &cache_event,
+        &mut adapters,
+        config.failure_policy,
+        &test_routing(),
+        &meta,
+    );
     assert_eq!(report.status, ExecutionStatus::Failed);
     assert_eq!(report.adapter_reports[0].outcome, AdapterOutcome::Failed);
     let msg = format!("{:?}", report.adapter_reports[0].error);

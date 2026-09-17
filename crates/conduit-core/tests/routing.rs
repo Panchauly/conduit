@@ -1,14 +1,15 @@
 use conduit_core::event::Event;
-use conduit_core::routing::route;
+use conduit_core::routing::{AdapterId, load_routing, route_with_rules};
 
 use std::collections::HashMap;
 
-fn set_test_routing() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+fn test_routing() -> HashMap<String, Vec<AdapterId>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
-        .join("fixtures");
+        .join("fixtures")
+        .join("routing.json");
 
-    std::env::set_current_dir(dir).expect("failed to set test cwd");
+    load_routing(path).expect("routing fixture loads")
 }
 
 fn test_event(event_type: &str) -> Event {
@@ -24,10 +25,9 @@ fn test_event(event_type: &str) -> Event {
 
 #[test]
 fn user_created_routes_to_sql_and_document() {
-    set_test_routing();
     let event = test_event("UserCreated");
 
-    let targets = route(&event).expect("routing table loads from test fixtures");
+    let targets = route_with_rules(&event, &test_routing());
 
     assert_eq!(
         targets,
@@ -37,10 +37,9 @@ fn user_created_routes_to_sql_and_document() {
 }
 #[test]
 fn cache_invalidated_routes_to_key_value() {
-    set_test_routing();
     let event = test_event("CacheInvalidated");
 
-    let targets = route(&event).expect("routing table loads from test fixtures");
+    let targets = route_with_rules(&event, &test_routing());
 
     assert_eq!(
         targets,
@@ -51,10 +50,9 @@ fn cache_invalidated_routes_to_key_value() {
 
 #[test]
 fn unknown_event_routes_to_document_by_default() {
-    set_test_routing();
     let event = test_event("UnknownEvent");
 
-    let targets = route(&event).expect("routing table loads from test fixtures");
+    let targets = route_with_rules(&event, &test_routing());
 
     assert!(
         targets.is_empty(),

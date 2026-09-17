@@ -93,13 +93,16 @@ pub mod report {
 /// - `config.validate()` MUST be called before this function
 /// - call [`validate_projection_config`] at startup when config + routing + mappings are loaded (CLI does this for run/replay/dry-run)
 /// - mappings are consumed exactly once
-/// - routing remains config-backed
+/// - `routing_rules` is caller-loaded (e.g. via [`pipeline::load_project`]) — there is
+///   no implicit global routing table
+#[allow(clippy::too_many_arguments)]
 pub fn execute_event(
     config: &ConduitConfig,
     sql_mappings: HashMap<String, SqlMapping>,
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
     graph_mappings: HashMap<String, GraphMapping>,
+    routing_rules: &HashMap<String, Vec<crate::routing::AdapterId>>,
     event: Event,
 ) -> ExecutionReport {
     execute_event_with_upcasters(
@@ -108,6 +111,7 @@ pub fn execute_event(
         document_mappings,
         kv_mappings,
         graph_mappings,
+        routing_rules,
         event,
         Arc::new(UpcasterRegistry::new()),
     )
@@ -122,6 +126,7 @@ pub fn execute_event_with_upcasters(
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
     graph_mappings: HashMap<String, GraphMapping>,
+    routing_rules: &HashMap<String, Vec<crate::routing::AdapterId>>,
     event: Event,
     upcasters: Arc<UpcasterRegistry>,
 ) -> ExecutionReport {
@@ -134,7 +139,13 @@ pub fn execute_event_with_upcasters(
         upcasters,
     );
     let adapter_meta = crate::runtime::adapter_metadata_map(config);
-    dispatch(&event, &mut adapters, config.failure_policy, &adapter_meta)
+    dispatch(
+        &event,
+        &mut adapters,
+        config.failure_policy,
+        routing_rules,
+        &adapter_meta,
+    )
 }
 
 /// Execute a single event with an explicit [ExecutionMode] (e.g. [execution::ExecutionMode::DryRun] for no-write simulation).
@@ -147,6 +158,7 @@ pub fn execute_event_with_mode(
     document_mappings: HashMap<String, DocumentMapping>,
     kv_mappings: HashMap<String, KvMapping>,
     graph_mappings: HashMap<String, GraphMapping>,
+    routing_rules: &HashMap<String, Vec<crate::routing::AdapterId>>,
     event: Event,
     mode: crate::execution::ExecutionMode,
 ) -> ExecutionReport {
@@ -157,6 +169,7 @@ pub fn execute_event_with_mode(
             document_mappings,
             kv_mappings,
             graph_mappings,
+            routing_rules,
             event,
         ),
         crate::execution::ExecutionMode::DryRun => {
@@ -169,7 +182,13 @@ pub fn execute_event_with_mode(
                 Arc::new(UpcasterRegistry::new()),
             );
             let adapter_meta = crate::runtime::adapter_metadata_map(config);
-            dispatch(&event, &mut adapters, config.failure_policy, &adapter_meta)
+            dispatch(
+                &event,
+                &mut adapters,
+                config.failure_policy,
+                routing_rules,
+                &adapter_meta,
+            )
         }
     }
 }

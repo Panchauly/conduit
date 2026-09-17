@@ -180,13 +180,8 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
     };
     live_config.validate().unwrap();
 
-    let routing_json = tmp.path().join("routing.json");
-    fs::write(&routing_json, r#"{"UserUpdated": ["sql-primary"]}"#).unwrap();
-    // SAFETY: single-threaded within this test; no other test in this binary
-    // reads/writes ROUTING_CONFIG or the global routing table.
-    unsafe {
-        std::env::set_var("ROUTING_CONFIG", &routing_json);
-    }
+    let routing_rules: HashMap<String, Vec<String>> =
+        HashMap::from([("UserUpdated".to_string(), vec!["sql-primary".to_string()])]);
 
     for event in create_then_update_events() {
         let report = execute_event(
@@ -195,6 +190,7 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
+            &routing_rules,
             event,
         );
         assert_eq!(

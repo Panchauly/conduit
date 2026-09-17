@@ -8,7 +8,7 @@ use conduit_core::AdapterExecutionMeta;
 use conduit_core::adapter::{AdapterError, AdapterResult, StorageAdapter};
 use conduit_core::dispatch::dispatch;
 use conduit_core::event::Event;
-use conduit_core::routing::{AdapterId, StorageKind};
+use conduit_core::routing::{AdapterId, StorageKind, load_routing};
 use conduit_core::runtime::config::FailurePolicy;
 
 use std::collections::HashMap;
@@ -36,12 +36,13 @@ impl StorageAdapter for TestAdapter {
     }
 }
 
-fn set_test_routing() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+fn test_routing() -> HashMap<String, Vec<AdapterId>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
-        .join("fixtures");
+        .join("fixtures")
+        .join("routing.json");
 
-    std::env::set_current_dir(dir).expect("failed to set test cwd");
+    load_routing(path).expect("routing fixture loads")
 }
 
 fn test_event() -> Event {
@@ -57,8 +58,6 @@ fn test_event() -> Event {
 
 #[test]
 fn kv_adapter_runs_after_its_sql_dependency_via_ordinary_dispatch() {
-    set_test_routing();
-
     let event = test_event();
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
@@ -91,7 +90,13 @@ fn kv_adapter_runs_after_its_sql_dependency_via_ordinary_dispatch() {
         ),
     ]);
 
-    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &meta);
+    let report = dispatch(
+        &event,
+        &mut adapters,
+        FailurePolicy::FailFast,
+        &test_routing(),
+        &meta,
+    );
 
     assert_eq!(report.adapter_reports.len(), 2);
     assert_eq!(
@@ -116,6 +121,7 @@ fn kv_adapter_runs_after_its_sql_dependency_via_ordinary_dispatch() {
         &event,
         &mut failing_adapters,
         FailurePolicy::FailFast,
+        &test_routing(),
         &meta,
     );
     assert_eq!(

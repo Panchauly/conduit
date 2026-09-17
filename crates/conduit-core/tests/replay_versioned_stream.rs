@@ -257,14 +257,6 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
     };
     live_config.validate().unwrap();
 
-    let routing_json = tmp.path().join("routing.json");
-    fs::write(&routing_json, r#"{"UserCreated": ["sql-primary"]}"#).unwrap();
-    // SAFETY: single-threaded within this test; no other test in this binary
-    // reads/writes ROUTING_CONFIG or the global routing table.
-    unsafe {
-        std::env::set_var("ROUTING_CONFIG", &routing_json);
-    }
-
     let shared_upcasters = Arc::new(registry());
     for event in mixed_version_events() {
         let report = execute_event_with_upcasters(
@@ -273,6 +265,7 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
+            &routing_rules,
             event,
             Arc::clone(&shared_upcasters),
         );

@@ -19,7 +19,7 @@ use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
-use crate::dispatch::dispatch_with_routing;
+use crate::dispatch::dispatch;
 use crate::execution::{AdapterOutcome, ExecutionReport, ExecutionStatus};
 use crate::routing::AdapterId;
 use crate::runtime::build_adapters_from_config;
@@ -135,7 +135,7 @@ fn dispatch_batch(
     };
     reports.clear();
     for (idx, se) in sorted.iter().enumerate() {
-        let mut report = dispatch_with_routing(
+        let mut report = dispatch(
             &se.event,
             adapters,
             failure_policy,

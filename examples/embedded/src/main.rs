@@ -18,22 +18,17 @@ fn main() {
         .execute("CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT)", [])
         .unwrap();
 
-    // `execute_event` (unlike `pipeline::run` / `run_sources`) routes through
-    // a process-global routing table loaded once from `$ROUTING_CONFIG`
-    // (default `./routing.json`) — there is no explicit-routing-map overload
-    // for the single-call API. A host embedding conduit-core sets this once
-    // at startup, same as any other process-wide config.
-    let routing_path = std::env::temp_dir().join("conduit-embedded-example-routing.json");
-    std::fs::write(&routing_path, r#"{"UserRegistered": ["sql-primary"]}"#).unwrap();
-    // SAFETY: single-threaded example.
-    unsafe {
-        std::env::set_var("ROUTING_CONFIG", &routing_path);
-    }
+    // `execute_event` takes routing rules explicitly — no config file or
+    // env var needed; a host embedding conduit-core builds this map however
+    // it likes (loaded from disk via `routing::load_routing`, or built
+    // in-process, as here) and passes it into every call.
+    let routing_rules: HashMap<String, Vec<String>> =
+        HashMap::from([("UserRegistered".to_string(), vec!["sql-primary".to_string()])]);
 
     let config = ConduitConfig {
         version: 1,
         routing: RoutingConfig {
-            file: routing_path.to_string_lossy().into(),
+            file: "routing.json".into(),
         },
         adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
@@ -73,6 +68,7 @@ fn main() {
         HashMap::new(), // document_mappings
         HashMap::new(), // kv_mappings
         HashMap::new(), // graph_mappings
+        &routing_rules,
         event,
     );
     println!("status: {:?}", report.status);

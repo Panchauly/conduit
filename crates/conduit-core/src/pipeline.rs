@@ -229,6 +229,7 @@ pub fn run(
         project.doc_mappings,
         project.kv_mappings,
         project.graph_mappings,
+        &project.routing_rules,
         event,
     ))
 }
@@ -247,6 +248,7 @@ pub fn dry_run(
         project.doc_mappings,
         project.kv_mappings,
         project.graph_mappings,
+        &project.routing_rules,
         event,
         ExecutionMode::DryRun,
     ))
