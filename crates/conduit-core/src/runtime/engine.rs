@@ -107,9 +107,55 @@ impl ConduitRuntime {
         }
     }
 
+    /// Same as [`Self::load`], but also runs `register_backends` on the
+    /// runtime before returning it — the "load, then register" combo every
+    /// caller wanting non-default adapter types needs (Phase 28's
+    /// `conduit-backends` wiring crate is the typical `register_backends`).
+    pub fn load_with_backends(
+        config_path: &Path,
+        mappings_dir: &Path,
+        register_backends: impl FnOnce(&mut ConduitRuntime),
+    ) -> Result<Self, PipelineError> {
+        let mut runtime = Self::load(config_path, mappings_dir)?;
+        register_backends(&mut runtime);
+        Ok(runtime)
+    }
+
     /// The loaded, validated config.
     pub fn config(&self) -> &ConduitConfig {
         &self.config
+    }
+
+    /// The loaded SQL mapping table, if adapters haven't been built yet
+    /// (`ensure_adapters_built` consumes it) — read this (and the sibling
+    /// `*_mappings`/`upcasters` accessors below) to hand a backend's factory
+    /// what it needs *before* registering it, since the registry's own
+    /// factory signature only carries the raw YAML value. `None` after the
+    /// first `run_once`/`dry_run_once`/`replay`/`run_sources` call.
+    pub fn sql_mappings(&self) -> Option<&HashMap<String, SqlMapping>> {
+        self.sql_mappings.as_ref()
+    }
+
+    /// Same as [`Self::sql_mappings`], for the document-mapping table.
+    pub fn document_mappings(&self) -> Option<&HashMap<String, DocumentMapping>> {
+        self.doc_mappings.as_ref()
+    }
+
+    /// Same as [`Self::sql_mappings`], for the key-value mapping table.
+    pub fn kv_mappings(&self) -> Option<&HashMap<String, KvMapping>> {
+        self.kv_mappings.as_ref()
+    }
+
+    /// Same as [`Self::sql_mappings`], for the graph mapping table.
+    pub fn graph_mappings(&self) -> Option<&HashMap<String, GraphMapping>> {
+        self.graph_mappings.as_ref()
+    }
+
+    /// The upcaster registry this runtime builds adapters with — a cheap
+    /// `Arc` clone, safe to call any time (unlike the mapping accessors, it
+    /// doesn't get consumed when adapters build).
+    pub fn upcasters(&self) -> Arc<UpcasterRegistry> {
+        Arc::clone(&self.upcasters)
     }
 
     /// Register a factory for adapter `type: <type_name>`, so a `Custom`

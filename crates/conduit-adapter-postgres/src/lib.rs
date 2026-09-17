@@ -1,10 +1,16 @@
-//! Phase 19.2–19.4: the Postgres SQL backend.
+//! Phase 19.2–19.4 (moved out of `conduit-core` in Phase 28): the Postgres
+//! SQL backend.
 //!
-//! Same `SqlMapping` / `decide()` / guard model as SQLite — this file supplies
-//! only what a driver genuinely owns: an r2d2 connection pool, a
+//! Same `SqlMapping` / `decide()` / guard model as SQLite — this crate
+//! supplies only what a driver genuinely owns: an r2d2 connection pool, a
 //! `READ COMMITTED` transaction with `SELECT … FOR UPDATE` on the guard row
 //! (real multi-writer safety, Phase 19.4), `$N` placeholders, typed column
 //! binding (Phase 19.3), and the Postgres guard-table DDL.
+//!
+//! Registers itself on a [`conduit_core::ConduitRuntime`] under `type:
+//! postgres` via [`factory`] — see `conduit-backends`, which wires this up by
+//! default, or `docs/writing-a-backend.md` for the extension pattern this
+//! crate is itself a worked example of.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,16 +19,20 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use postgres::NoTls;
 use postgres::types::ToSql;
 use r2d2_postgres::PostgresConnectionManager;
+use serde::Deserialize;
 use serde_json::Value;
 
-use super::adapter::SqlError;
-use super::exec::{self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite};
-use super::runtime::SqlRuntimeBuilder;
-use crate::adapter::{AdapterError, AdapterResult, GuardState, SkipReason, StorageAdapter};
-use crate::event::Event;
-use crate::routing::StorageKind;
-use crate::runtime::config::MigrationPolicy;
-use crate::upcast::UpcasterRegistry;
+use conduit_core::adapter::sql::adapter::SqlError;
+use conduit_core::adapter::sql::exec::{
+    self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite,
+};
+use conduit_core::adapter::sql::mapping::SqlMapping;
+use conduit_core::adapter::sql::runtime::SqlRuntimeBuilder;
+use conduit_core::adapter::{AdapterError, AdapterResult, GuardState, SkipReason, StorageAdapter};
+use conduit_core::event::Event;
+use conduit_core::routing::StorageKind;
+use conduit_core::runtime::config::{ConfigError, MigrationPolicy};
+use conduit_core::upcast::UpcasterRegistry;
 
 type PgPool = r2d2::Pool<PostgresConnectionManager<NoTls>>;
 
@@ -57,6 +67,20 @@ impl PgColType {
 }
 
 type ColTypes = HashMap<String, PgColType>;
+
+/// The `config:` block for `type: postgres` — moved out of
+/// `conduit-core::runtime::config` in Phase 28 (Postgres no longer has a
+/// typed `AdapterConfig` variant; this is parsed by [`factory`] from the
+/// `Custom` entry's raw `config:` sub-value).
+#[derive(Debug, Deserialize)]
+pub struct PostgresConfig {
+    /// `postgres://user:pass@host:port/db`. May contain `${ENV_VAR}` references
+    /// (Phase 19.2) so credentials stay out of the committed config.
+    pub url: String,
+    /// r2d2 pool size (default 4).
+    #[serde(default)]
+    pub pool_size: Option<u32>,
+}
 
 /// Postgres SQL adapter (Phase 19). The first adapter **without** a
 /// single-writer assumption — concurrent dispatch threads and concurrent
@@ -509,6 +533,75 @@ impl SqlTxn for PostgresTxn<'_> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Registry factory (Phase 28)
+// ---------------------------------------------------------------------------
+
+/// Build a [`PostgresAdapter`] from a `Custom` adapter entry's raw YAML value
+/// plus the pieces only a [`conduit_core::ConduitRuntime`] can supply
+/// (`sql_mappings`/`upcasters`/`migration_policy` — the registry's own
+/// factory signature only carries `raw`). `conduit-backends` adapts this
+/// richer signature into the registry's `Fn(serde_yaml::Value) -> ...` shape
+/// via closure capture; see that crate for the wiring.
+pub fn factory(
+    raw: serde_yaml::Value,
+    sql_mappings: HashMap<String, SqlMapping>,
+    upcasters: Arc<UpcasterRegistry>,
+    migration_policy: MigrationPolicy,
+) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+    let id = raw
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ConfigError::FactoryConfigInvalid("postgres adapter missing `id`".into()))?
+        .to_string();
+    let priority = raw
+        .get("priority")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| {
+            ConfigError::FactoryConfigInvalid("postgres adapter missing `priority`".into())
+        })? as u32;
+    let cfg: PostgresConfig = raw
+        .get("config")
+        .cloned()
+        .ok_or_else(|| {
+            ConfigError::FactoryConfigInvalid(format!("postgres adapter {id:?} missing `config`"))
+        })
+        .and_then(|v| {
+            serde_yaml::from_value(v).map_err(|e| {
+                ConfigError::FactoryConfigInvalid(format!(
+                    "postgres adapter {id:?}: invalid `config`: {e}"
+                ))
+            })
+        })?;
+
+    // Phase 19.5's pre-flight URL check, relocated here since Postgres no
+    // longer has a typed `AdapterConfig` variant for `validate_projection_config`
+    // to match on — the check still happens, just at build time instead of
+    // config-validate time (see the phase's design note on this trade-off).
+    let url = conduit_core::runtime::config::expand_env(&cfg.url);
+    if url.trim().is_empty() {
+        return Err(ConfigError::FactoryConfigInvalid(format!(
+            "postgres adapter {id:?}: `url` is empty"
+        )));
+    }
+    if url.parse::<postgres::Config>().is_err() {
+        return Err(ConfigError::FactoryConfigInvalid(format!(
+            "postgres adapter {id:?}: `url` does not parse: {url}"
+        )));
+    }
+
+    let builder = SqlRuntimeBuilder::new(sql_mappings);
+    Ok(Box::new(PostgresAdapter::new(
+        id,
+        &url,
+        cfg.pool_size.unwrap_or(4),
+        priority,
+        builder,
+        upcasters,
+        migration_policy,
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,5 +655,23 @@ mod tests {
         // wrong shape for the column → a clear error, not a silent coercion
         assert!(bind_value(&json!("not a number"), PgColType::Int).is_err());
         assert!(bind_value(&json!("nonsense"), PgColType::Timestamptz).is_err());
+    }
+
+    #[test]
+    fn factory_rejects_an_unparseable_url() {
+        let raw = serde_yaml::to_value(serde_json::json!({
+            "type": "postgres",
+            "id": "pg1",
+            "priority": 10,
+            "config": { "url": "" },
+        }))
+        .unwrap();
+        let result = factory(
+            raw,
+            HashMap::new(),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        assert!(matches!(result, Err(ConfigError::FactoryConfigInvalid(_))));
     }
 }

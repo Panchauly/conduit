@@ -242,7 +242,12 @@ fn run_cmd(
 ) -> Result<i32, Box<dyn std::error::Error>> {
     // Back-compat: `run --event <file>` stays a one-shot single-event run.
     if let Some(event) = event {
-        let report = pipeline::run(&config, &mappings, &event)?;
+        let report = pipeline::run(
+            &config,
+            &mappings,
+            &event,
+            conduit_backends::register_default_backends,
+        )?;
         render_report(&report, output)?;
         return Ok(exit_code_from_status(report.status));
     }
@@ -267,7 +272,13 @@ fn run_cmd(
         let _ = ctrlc::set_handler(move || stop.store(true, Ordering::Relaxed));
     }
 
-    let report = pipeline::run_source_loop(&config, &mappings, &opts, &stop)?;
+    let report = pipeline::run_source_loop(
+        &config,
+        &mappings,
+        &opts,
+        &stop,
+        conduit_backends::register_default_backends,
+    )?;
     render_source_run_report(&report, output)?;
     Ok(match report.stopped_reason {
         StoppedReason::RetryExhausted => 1,
@@ -302,7 +313,13 @@ fn ingest_cmd(
         ..Default::default()
     };
 
-    let report = conduit_ingest::serve(&config, &mappings, &opts, &stop)?;
+    let report = conduit_ingest::serve(
+        &config,
+        &mappings,
+        &opts,
+        &stop,
+        conduit_backends::register_default_backends,
+    )?;
     render_source_run_report(&report, output)?;
     Ok(match report.stopped_reason {
         StoppedReason::RetryExhausted => 1,
@@ -406,7 +423,13 @@ fn replay_cmd(
         progress_interval: progress_every,
         validate_routing,
     };
-    let report = pipeline::replay(&config, &mappings, &events, &opts)?;
+    let report = pipeline::replay(
+        &config,
+        &mappings,
+        &events,
+        &opts,
+        conduit_backends::register_default_backends,
+    )?;
 
     render_replay_report(&report, output)?;
 
@@ -545,7 +568,12 @@ fn dry_run_cmd(
     event: PathBuf,
     output: OutputFormat,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    let report = pipeline::dry_run(&config, &mappings, &event)?;
+    let report = pipeline::dry_run(
+        &config,
+        &mappings,
+        &event,
+        conduit_backends::register_default_backends,
+    )?;
     render_report(&report, output)?;
     Ok(exit_code_from_status(report.status))
 }

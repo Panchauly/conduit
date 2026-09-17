@@ -365,7 +365,7 @@ pub fn decide(
 /// arrays fall back to their JSON text — mapping authors should not use those
 /// as an identity or column value (identity paths reject them outright; see
 /// [`is_identity_scalar`]).
-pub(crate) fn json_scalar_to_string(value: &serde_json::Value) -> String {
+pub fn json_scalar_to_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Number(n) => n.to_string(),

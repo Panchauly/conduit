@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use crate::routing::AdapterId;
 
 const KNOWN_ADAPTER_TYPES: &[&str] = &[
-    "sqlite", "file", "keyvalue", "graph", "postgres", "redis", "mongodb", "neo4j", "mysql",
+    "sqlite", "file", "keyvalue", "graph", "redis", "mongodb", "neo4j", "mysql",
 ];
 
 // ------------------------------------------------------------
@@ -170,9 +170,6 @@ enum KnownAdapterConfig {
     #[serde(rename = "graph")]
     Graph(GraphAdapterConfig),
 
-    #[serde(rename = "postgres")]
-    Postgres(PostgresAdapterConfig),
-
     #[serde(rename = "redis")]
     Redis(RedisAdapterConfig),
 
@@ -192,7 +189,6 @@ pub enum AdapterConfig {
     File(FileAdapterConfig),
     KeyValue(KeyValueAdapterConfig),
     Graph(GraphAdapterConfig),
-    Postgres(PostgresAdapterConfig),
     Redis(RedisAdapterConfig),
     MongoDb(MongoDbAdapterConfig),
     Neo4j(Neo4jAdapterConfig),
@@ -249,7 +245,6 @@ impl<'de> Deserialize<'de> for AdapterConfig {
                 KnownAdapterConfig::File(c) => Ok(AdapterConfig::File(c)),
                 KnownAdapterConfig::KeyValue(c) => Ok(AdapterConfig::KeyValue(c)),
                 KnownAdapterConfig::Graph(c) => Ok(AdapterConfig::Graph(c)),
-                KnownAdapterConfig::Postgres(c) => Ok(AdapterConfig::Postgres(c)),
                 KnownAdapterConfig::Redis(c) => Ok(AdapterConfig::Redis(c)),
                 KnownAdapterConfig::MongoDb(c) => Ok(AdapterConfig::MongoDb(c)),
                 KnownAdapterConfig::Neo4j(c) => Ok(AdapterConfig::Neo4j(c)),
@@ -365,29 +360,6 @@ pub struct GraphAdapterConfig {
 #[derive(Debug, Deserialize)]
 pub struct GraphConfig {
     pub root: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PostgresAdapterConfig {
-    pub id: String,
-    pub priority: u32,
-    pub config: PostgresConfig,
-
-    #[serde(default)]
-    pub capabilities: Option<AdapterCapabilities>,
-
-    #[serde(default)]
-    pub depends_on: Vec<AdapterId>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PostgresConfig {
-    /// `postgres://user:pass@host:port/db`. May contain `${ENV_VAR}` references
-    /// (Phase 19.2) so credentials stay out of the committed config.
-    pub url: String,
-    /// r2d2 pool size (default 4).
-    #[serde(default)]
-    pub pool_size: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -580,6 +552,13 @@ pub enum ConfigError {
     /// `FailedAdapter` placeholder, not by making `build_adapters_from_config`
     /// fallible — see `runtime::factory`'s doc comment.
     UnregisteredAdapterType(String),
+
+    /// Phase 28: a registered adapter factory rejected its own config — a
+    /// missing field, or (e.g.) a connection URL that doesn't parse. The
+    /// factory's own message is preserved verbatim. Surfaced the same way as
+    /// `UnregisteredAdapterType` — a per-adapter `FailedAdapter` placeholder,
+    /// not a fallible `build_adapters_from_config`.
+    FactoryConfigInvalid(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -617,6 +596,7 @@ impl fmt::Display for ConfigError {
                     type_name
                 )
             }
+            ConfigError::FactoryConfigInvalid(msg) => write!(f, "{}", msg),
         }
     }
 }
@@ -634,7 +614,6 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => &cfg.id,
             AdapterConfig::KeyValue(cfg) => &cfg.id,
             AdapterConfig::Graph(cfg) => &cfg.id,
-            AdapterConfig::Postgres(cfg) => &cfg.id,
             AdapterConfig::Redis(cfg) => &cfg.id,
             AdapterConfig::MongoDb(cfg) => &cfg.id,
             AdapterConfig::Neo4j(cfg) => &cfg.id,
@@ -649,7 +628,6 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => cfg.priority,
             AdapterConfig::KeyValue(cfg) => cfg.priority,
             AdapterConfig::Graph(cfg) => cfg.priority,
-            AdapterConfig::Postgres(cfg) => cfg.priority,
             AdapterConfig::Redis(cfg) => cfg.priority,
             AdapterConfig::MongoDb(cfg) => cfg.priority,
             AdapterConfig::Neo4j(cfg) => cfg.priority,
@@ -665,7 +643,6 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::KeyValue(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Graph(cfg) => cfg.capabilities.as_deref(),
-            AdapterConfig::Postgres(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Redis(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::MongoDb(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Neo4j(cfg) => cfg.capabilities.as_deref(),
@@ -680,7 +657,6 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => &cfg.depends_on,
             AdapterConfig::KeyValue(cfg) => &cfg.depends_on,
             AdapterConfig::Graph(cfg) => &cfg.depends_on,
-            AdapterConfig::Postgres(cfg) => &cfg.depends_on,
             AdapterConfig::Redis(cfg) => &cfg.depends_on,
             AdapterConfig::MongoDb(cfg) => &cfg.depends_on,
             AdapterConfig::Neo4j(cfg) => &cfg.depends_on,
@@ -781,8 +757,15 @@ mod phase19_tests {
         }
     }
 
+    /// Phase 28: Postgres moved out of `conduit-core` into `conduit-adapter-postgres`
+    /// — `type: postgres` is no longer a `KnownAdapterConfig` variant, so it falls
+    /// through to `AdapterConfig::Custom` exactly like any other unrecognized type,
+    /// resolved at adapter-build time via a registered factory
+    /// (`conduit-adapter-postgres::factory`, wired up by `conduit-backends`). See
+    /// that crate's own tests for the full parse-and-build coverage this used to
+    /// assert here.
     #[test]
-    fn parses_a_postgres_adapter() {
+    fn postgres_type_falls_through_to_custom() {
         let yaml = r#"
 version: 1
 routing: { file: routing.json }
@@ -798,9 +781,13 @@ adapters:
         let cfg: ConduitConfig = serde_yaml::from_str(yaml).unwrap();
         cfg.validate().unwrap();
         match &cfg.adapters[0] {
-            AdapterConfig::Postgres(p) => {
-                assert_eq!(p.id, "pg-primary");
-                assert_eq!(p.config.pool_size, Some(8));
+            AdapterConfig::Custom(c) => {
+                assert_eq!(c.type_name, "postgres");
+                assert_eq!(c.id, "pg-primary");
+                assert_eq!(
+                    c.raw.get("config").and_then(|v| v.get("pool_size")),
+                    Some(&serde_yaml::Value::Number(8.into()))
+                );
             }
             other => panic!("{other:?}"),
         }

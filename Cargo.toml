@@ -5,6 +5,8 @@ members = [
     "crates/conduit-cli",
     "crates/conduit-ingest",
     "crates/conduit-client",
+    "crates/conduit-adapter-postgres",
+    "crates/conduit-backends",
 ]
 # examples/ are standalone Cargo projects (each depends on the engine via a
 # path dependency, the way a real consumer would depend on a published
@@ -24,3 +26,5 @@ rust-version = "1.88"
 conduit-core = { path = "crates/conduit-core", version = "0.8.0" }
 conduit-ingest = { path = "crates/conduit-ingest", version = "0.8.0" }
 conduit-client = { path = "crates/conduit-client", version = "0.8.0" }
+conduit-adapter-postgres = { path = "crates/conduit-adapter-postgres", version = "0.8.0" }
+conduit-backends = { path = "crates/conduit-backends", version = "0.8.0" }

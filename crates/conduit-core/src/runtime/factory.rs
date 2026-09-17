@@ -16,7 +16,6 @@ use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use crate::adapter::keyvalue::store::FileKvStore;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::adapter::sql::mysql::MySqlAdapter;
-use crate::adapter::sql::postgres::PostgresAdapter;
 use crate::adapter::sql::runtime::SqlRuntimeBuilder;
 use crate::adapter::sql::sqlite::SqliteAdapter;
 use crate::adapter::{AdapterError, AdapterResult};
@@ -134,20 +133,6 @@ pub fn build_adapters_from_config(
                 adapters.push(Box::new(GraphStore::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::Postgres(cfg) => {
-                let builder = SqlRuntimeBuilder::new(sql_mappings.clone());
-                let url = crate::runtime::config::expand_env(&cfg.config.url);
-                adapters.push(Box::new(PostgresAdapter::new(
-                    cfg.id.clone(),
-                    &url,
-                    cfg.config.pool_size.unwrap_or(4),
                     cfg.priority,
                     builder,
                     Arc::clone(&upcasters),
