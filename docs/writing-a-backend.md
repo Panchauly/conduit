@@ -111,9 +111,10 @@ of the four traits above plus its orchestration function), make it available
 under a `type:` name in the YAML config:
 
 ```rust
-use conduit_core::register_adapter_factory;
+use conduit_core::ConduitRuntime;
 
-register_adapter_factory("mydb", |raw_config: serde_yaml::Value| {
+let mut runtime = ConduitRuntime::load(&config_path, &mappings_dir)?;
+runtime.register_adapter_factory("mydb", |raw_config: serde_yaml::Value| {
     // `raw_config` is the *entire* adapter list entry — `type`, `id`,
     // `priority`, `config`, `capabilities`, `depends_on`, all of it, exactly
     // as the user wrote it under `adapters:`. Pull out what your adapter
@@ -126,15 +127,21 @@ register_adapter_factory("mydb", |raw_config: serde_yaml::Value| {
 });
 ```
 
-Call this **before** `build_adapters_from_config` runs — typically at the top
-of your embedding application's `main`, if you're using Conduit as a library
-(the "embedded crate" deployment mode; see `architecture.md` §1.3). From that
-point on, `type: mydb` in the YAML config resolves through your factory
-exactly like `type: postgres` resolves through a built-in one: same
-`id`/`priority`/`capabilities`/`depends_on` handling, same dependency-order
-and routing treatment, same dispatch. Nothing in `dispatch.rs` or
-`runtime/dependency_graph.rs` distinguishes a registered adapter from a
-built-in one.
+Call this **before** the runtime resolves adapters (i.e. before the first
+`run_once`/`dry_run_once`/`replay`/`run_sources` call) — typically right after
+`ConduitRuntime::load` in your embedding application's `main`, if you're
+using Conduit as a library (the "embedded crate" deployment mode; see
+`architecture.md` §1.3). From that point on, `type: mydb` in the YAML config
+resolves through your factory exactly like `type: postgres` resolves through
+a built-in one: same `id`/`priority`/`capabilities`/`depends_on` handling,
+same dependency-order and routing treatment, same dispatch. Nothing in
+`dispatch.rs` or `runtime/dependency_graph.rs` distinguishes a registered
+adapter from a built-in one.
+
+**Phase 27:** the registry is owned by the `ConduitRuntime` you register on,
+not a process-wide global — two runtimes (two engines in one process, or two
+tests in one binary) never see each other's registrations, and there's no
+need for globally-unique type-name conventions to avoid cross-test collision.
 
 If `type:` names something nobody registered, that adapter becomes an
 always-fails placeholder rather than crashing config loading — every other
@@ -146,11 +153,11 @@ per-event failure, not a startup crash.
 
 There is no dynamic loading here — no `dlopen`, no FFI. This is Rust's
 ordinary compile-time extension model: implement the trait, depend on
-`conduit-core`, call `register_adapter_factory`. `conduit-cli` as shipped has
-no community backends registered; getting one into a binary means building a
-small custom binary against the registry — three lines beyond what
-`conduit-cli`'s own `main.rs` already does, consistent with the Thin CLI
-Pattern.
+`conduit-core`, call `register_adapter_factory` on your runtime.
+`conduit-cli` as shipped has no community backends registered; getting one
+into a binary means building a small custom binary that builds its own
+`ConduitRuntime` — a few lines beyond what `conduit-cli`'s own `main.rs`
+already does, consistent with the Thin CLI Pattern.
 
 ## Worked example: the MySQL backend
 
@@ -191,7 +198,8 @@ as a separate crate. A community backend for a store Conduit doesn't ship
 (DynamoDB, Elasticsearch, …) follows the exact same pattern from its own,
 separate crate: implement the trait that matches your storage kind, satisfy
 the atomicity contract, decide on a guard shape, and call
-`register_adapter_factory` from your crate's own init path (or ask the
-embedding application to call it). Nothing about being out-of-tree changes
+`register_adapter_factory` on the embedding application's `ConduitRuntime`
+from your crate's own init path (or ask the embedding application to call
+it). Nothing about being out-of-tree changes
 any of the above — `mysql.rs` is the same code shape a real out-of-tree
 backend would have, just living in this repository instead of its own.

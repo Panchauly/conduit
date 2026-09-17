@@ -613,7 +613,7 @@ impl fmt::Display for ConfigError {
             ConfigError::UnregisteredAdapterType(type_name) => {
                 write!(
                     f,
-                    "no adapter factory registered for type {:?} (call register_adapter_factory before build_adapters_from_config)",
+                    "no adapter factory registered for type {:?} (call ConduitRuntime::register_adapter_factory before adapters are built)",
                     type_name
                 )
             }

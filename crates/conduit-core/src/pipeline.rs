@@ -18,22 +18,20 @@ use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::loader::load_sql_mappings;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::event::Event;
-use crate::execution::{ExecutionMode, ExecutionReport};
-use crate::replay::{
-    ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptions, events_from_path,
-};
+use crate::execution::ExecutionReport;
+use crate::replay::{ReplayLoadError, ReplayReport, ReplayRunOptions, events_from_path};
 use crate::routing::{AdapterId, load_routing, route_with_rules};
 use crate::runtime::config::{ConduitConfig, ConfigError, SourceConfig};
+use crate::runtime::engine::ConduitRuntime;
 use crate::runtime::{
     ValidationReport, adapter_metadata_map, dependency_depth_exceeds_recommended,
     dependency_layers_grouped, dependency_layers_parallel, validate_projection_config,
     validate_routing_and_dependencies_for_event_type,
 };
 use crate::source::directory::DirectorySource;
-use crate::source::runner::{SourceRunOptions, SourceRunReport, run_sources};
+use crate::source::runner::{SourceRunOptions, SourceRunReport};
 use crate::source::stdin::StdinSource;
 use crate::source::{EventSource, SourceError};
-use crate::{execute_event, execute_event_with_mode};
 use std::sync::atomic::AtomicBool;
 
 // ---------------------------------------------------------------------------
@@ -221,37 +219,20 @@ pub fn run(
     mappings_dir: &Path,
     event_path: &Path,
 ) -> Result<ExecutionReport, PipelineError> {
-    let project = load_project(config_path, mappings_dir)?;
+    let mut runtime = ConduitRuntime::load(config_path, mappings_dir)?;
     let event = load_event(event_path)?;
-    Ok(execute_event(
-        &project.config,
-        project.sql_mappings,
-        project.doc_mappings,
-        project.kv_mappings,
-        project.graph_mappings,
-        &project.routing_rules,
-        event,
-    ))
+    Ok(runtime.run_once(event))
 }
 
-/// Same as [run] but executes in [ExecutionMode::DryRun].
+/// Same as [run] but executes in dry-run mode.
 pub fn dry_run(
     config_path: &Path,
     mappings_dir: &Path,
     event_path: &Path,
 ) -> Result<ExecutionReport, PipelineError> {
-    let project = load_project(config_path, mappings_dir)?;
+    let mut runtime = ConduitRuntime::load(config_path, mappings_dir)?;
     let event = load_event(event_path)?;
-    Ok(execute_event_with_mode(
-        &project.config,
-        project.sql_mappings,
-        project.doc_mappings,
-        project.kv_mappings,
-        project.graph_mappings,
-        &project.routing_rules,
-        event,
-        ExecutionMode::DryRun,
-    ))
+    Ok(runtime.dry_run_once(event))
 }
 
 /// Result of [explain]: routing/dependency resolution for one event, without execution.
@@ -362,25 +343,15 @@ pub fn run_source_loop(
     opts: &SourceRunOptions,
     stop: &AtomicBool,
 ) -> Result<SourceRunReport, PipelineError> {
-    let project = load_project(config_path, mappings_dir)?;
-    let sources = build_sources(&project.config, config_path)?;
+    let mut runtime = ConduitRuntime::load(config_path, mappings_dir)?;
+    let sources = build_sources(runtime.config(), config_path)?;
     if sources.is_empty() {
         return Err(PipelineError::Mapping(
             "no sources configured — add `sources:` to the config, or use `run --event <file>`"
                 .to_string(),
         ));
     }
-    Ok(run_sources(
-        &project.config,
-        project.routing_rules,
-        project.sql_mappings,
-        project.doc_mappings,
-        project.kv_mappings,
-        project.graph_mappings,
-        sources,
-        opts,
-        stop,
-    )?)
+    Ok(runtime.run_sources(sources, opts, stop)?)
 }
 
 /// Replay a directory/file of events through the full pipeline.
@@ -390,15 +361,7 @@ pub fn replay(
     events_path: &Path,
     opts: &ReplayRunOptions,
 ) -> Result<ReplayReport, PipelineError> {
-    let project = load_project(config_path, mappings_dir)?;
+    let mut runtime = ConduitRuntime::load(config_path, mappings_dir)?;
     let mut iter = events_from_path(events_path)?;
-    let mut ctx = ReplayContext::new(
-        &project.config,
-        project.routing_rules,
-        project.sql_mappings,
-        project.doc_mappings,
-        project.kv_mappings,
-        project.graph_mappings,
-    );
-    Ok(ctx.run_stream_with_options(&mut iter, opts)?)
+    Ok(runtime.replay(&mut iter, opts)?)
 }
