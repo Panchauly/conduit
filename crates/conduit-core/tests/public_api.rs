@@ -2,31 +2,28 @@ use conduit_core::adapter::document::mapping::DocumentMapping;
 use conduit_core::adapter::sql::mapping::SqlMapping;
 use conduit_core::event::Event;
 use conduit_core::execute_event;
+use conduit_core::routing::{AdapterId, load_routing};
 use conduit_core::runtime::config::{
     AdapterConfig, ConduitConfig, FailurePolicy, FileAdapterConfig, FileConfig, RoutingConfig,
     SqliteAdapterConfig, SqliteConfig,
 };
 
 use std::collections::HashMap;
-use std::env;
 use std::path::Path;
 
 // ------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------
 
-fn set_test_routing() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+/// `tests/fixtures/routing.json` routes `UserCreated` to `["sql-primary", "doc-readmodel"]`
+/// — must match the adapter IDs used below.
+fn test_routing() -> HashMap<String, Vec<AdapterId>> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
-        .join("fixtures");
+        .join("fixtures")
+        .join("routing.json");
 
-    env::set_current_dir(dir).expect("failed to set test cwd");
-
-    // IMPORTANT: routing.json MUST match adapter IDs in this test
-    // routing.json content:
-    // {
-    //   "UserCreated": ["sqlite", "file"]
-    // }
+    load_routing(path).expect("routing fixture loads")
 }
 
 // ------------------------------------------------------------
@@ -35,8 +32,6 @@ fn set_test_routing() {
 
 #[test]
 fn execute_event_runs_without_panic() {
-    set_test_routing();
-
     // -----------------------------
     // Config
     // -----------------------------
@@ -131,6 +126,7 @@ document:
         doc_mappings,
         HashMap::new(),
         HashMap::new(),
+        &test_routing(),
         event,
     );
 

@@ -8,7 +8,7 @@ use conduit_core::AdapterExecutionMeta;
 use conduit_core::adapter::{AdapterError, AdapterResult, StorageAdapter};
 use conduit_core::dispatch::dispatch;
 use conduit_core::event::Event;
-use conduit_core::routing::{AdapterId, StorageKind};
+use conduit_core::routing::{AdapterId, StorageKind, load_routing};
 use conduit_core::runtime::config::FailurePolicy;
 
 use std::collections::HashMap;
@@ -54,11 +54,12 @@ impl StorageAdapter for FailingAdapter {
     }
 }
 
-fn set_test_routing() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+fn test_routing() -> HashMap<String, Vec<AdapterId>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
-        .join("fixtures");
-    std::env::set_current_dir(dir).expect("failed to set test cwd");
+        .join("fixtures")
+        .join("routing.json");
+    load_routing(path).expect("routing fixture loads")
 }
 
 fn test_event() -> Event {
@@ -93,7 +94,6 @@ fn meta() -> HashMap<AdapterId, AdapterExecutionMeta> {
 
 #[test]
 fn graph_adapter_runs_after_its_sql_dependency_via_ordinary_dispatch() {
-    set_test_routing();
     let event = test_event();
 
     let mut adapters: Vec<Box<dyn StorageAdapter>> = vec![
@@ -107,7 +107,8 @@ fn graph_adapter_runs_after_its_sql_dependency_via_ordinary_dispatch() {
         }),
     ];
     let m = meta();
-    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &m);
+    let rules = test_routing();
+    let report = dispatch(&event, &mut adapters, FailurePolicy::FailFast, &rules, &m);
 
     assert_eq!(report.adapter_reports.len(), 2);
     assert_eq!(report.adapter_reports[0].adapter_id, "sql-primary");
@@ -121,7 +122,7 @@ fn graph_adapter_runs_after_its_sql_dependency_via_ordinary_dispatch() {
             kind: StorageKind::Graph,
         }),
     ];
-    let failed = dispatch(&event, &mut failing, FailurePolicy::FailFast, &m);
+    let failed = dispatch(&event, &mut failing, FailurePolicy::FailFast, &rules, &m);
     assert_eq!(
         failed.adapter_reports.len(),
         1,

@@ -14,14 +14,13 @@ status: Succeeded
 projected: users.u1.name = "Ada"
 ```
 
-## The one gotcha
+## Routing
 
-`execute_event` routes through a **process-global** routing table
-(`crate::routing::global_routing_table`), loaded once from `$ROUTING_CONFIG`
-(default `./routing.json`) — unlike `pipeline::run` / `run_sources`, there's no
-explicit-routing-map overload for the single-call API. A real host sets
-`ROUTING_CONFIG` once at process startup; this example does the same in-process
-before its one call, purely to keep the example self-contained.
+`execute_event` takes routing rules as an explicit `&HashMap<String, Vec<AdapterId>>`
+argument — no config file, env var, or global state involved. This example builds
+the map in-process; a real host would more likely load it once at startup via
+[`conduit_core::routing::load_routing`](../../crates/conduit-core/src/routing.rs)
+and reuse it across calls.
 
 ## Next
 

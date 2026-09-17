@@ -30,27 +30,9 @@ fn dependency_order_failure_report(
     report.finish(started_at)
 }
 
+/// Dispatch a single event: resolve routing, order adapters by dependency, and
+/// run each in order, honoring `failure_policy` on the first failure.
 pub fn dispatch(
-    event: &Event,
-    adapters: &mut [Box<dyn StorageAdapter>],
-    failure_policy: FailurePolicy,
-    adapter_meta: &HashMap<AdapterId, AdapterExecutionMeta>,
-) -> ExecutionReport {
-    let routing_rules = match crate::routing::global_routing_table() {
-        Ok(rules) => rules,
-        Err(e) => {
-            return dependency_order_failure_report(
-                event,
-                SystemTime::now(),
-                format!("global routing table unavailable: {}", e),
-            );
-        }
-    };
-    dispatch_with_routing(event, adapters, failure_policy, routing_rules, adapter_meta)
-}
-
-/// Dispatch using explicit routing rules (replay, tests) instead of global routing.
-pub(crate) fn dispatch_with_routing(
     event: &Event,
     adapters: &mut [Box<dyn StorageAdapter>],
     failure_policy: FailurePolicy,

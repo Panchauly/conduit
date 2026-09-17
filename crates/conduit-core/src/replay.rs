@@ -12,7 +12,7 @@ use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
-use crate::dispatch::dispatch_with_routing;
+use crate::dispatch::dispatch;
 use crate::event::Event;
 use crate::execution::{
     AdapterExecutionReport, AdapterReportError, ExecutionReport, ExecutionStatus,
@@ -378,7 +378,7 @@ impl ReplayContext {
             {
                 unrouted_event_report(&event)
             } else {
-                dispatch_with_routing(
+                dispatch(
                     &event,
                     &mut self.adapters,
                     self.failure_policy,
