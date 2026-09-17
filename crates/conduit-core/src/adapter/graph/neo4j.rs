@@ -11,6 +11,19 @@
 //! snapshot-isolated transactions, Phase 23.3), so the CAS check here is
 //! the actual correctness mechanism, not a redundant belt-and-suspenders.
 //!
+//! **Post-release correctness fix:** the CAS originally read `g.last_sequence`
+//! in a `WHERE` clause with no write lock held on `g` yet (Cypher only takes
+//! one at the point of an actual write), so two concurrent transactions could
+//! both pass the check against the same stale value and whichever committed
+//! last in real time won — independent of sequence order. A 20-concurrent-
+//! writer stress test (not part of the committed suite; see
+//! `tests/stress_concurrent_writers.rs` if present locally) reproduced a lost
+//! update in roughly 7 of 10 runs. `cas_write` now forces the write lock
+//! immediately after `MERGE` (a same-value `SET g.kind = $kind`, a write that
+//! does nothing to the data but everything to the lock) *before* the `WHERE`
+//! reads `last_sequence` — see that function's doc comment for the full
+//! mechanism. The same stress test showed 0 failures in 30 runs after the fix.
+//!
 //! Guard placement: one `__ConduitGuard` node per `(kind, target, entity_key,
 //! facet)` — `kind` is `"node"` or `"edge"` (disambiguating a node label and
 //! an edge type that happen to share a name), `target` is the label or edge
@@ -414,6 +427,28 @@ impl Neo4jBackend<'_> {
     /// in one Cypher statement — `write_extra` is the part of the query that
     /// merges/matches the target record, empty when `properties` is `None`
     /// (the guard-only sequence bump).
+    ///
+    /// **The forced-lock `SET g.kind = $kind` immediately after `MERGE` is
+    /// load-bearing, not a no-op.** Cypher does not take a write lock on a
+    /// matched node until it is actually written to; a `WHERE` clause that
+    /// merely *reads* `g.last_sequence` (the naive version of this query)
+    /// evaluates against whatever the node holds at that moment with **no
+    /// lock held**. Two concurrent transactions can both read the same old
+    /// `last_sequence`, both pass the `WHERE`, and then whichever one's
+    /// `SET` physically commits last in real time wins — independent of
+    /// which one actually had the higher, correct sequence. That is a
+    /// genuine lost-update race, confirmed empirically under real
+    /// concurrent load (20 writers to one entity reproducibly converged to
+    /// a stale value in roughly 70% of runs before this fix). Reassigning
+    /// `g.kind` to the value it was just matched on is a write — Neo4j
+    /// takes the exclusive lock on `g` right there, so every other
+    /// transaction touching the same guard blocks until this one commits
+    /// or rolls back. Only *after* that lock is held does the `WHERE`
+    /// clause read `g.last_sequence`, which is then guaranteed to be the
+    /// latest committed value, not a pre-lock snapshot — this is the
+    /// standard "force a write to force the lock" idiom Cypher requires in
+    /// place of a `SELECT … FOR UPDATE`, which it has no direct equivalent
+    /// for.
     #[allow(clippy::too_many_arguments)]
     fn cas_write(
         &mut self,
@@ -430,6 +465,7 @@ impl Neo4jBackend<'_> {
     ) -> Result<(), GraphError> {
         let cypher = format!(
             "MERGE (g:__ConduitGuard {{kind: $kind, target: $target, entity_key: $entity_key, facet: $facet}}) \
+             SET g.kind = $kind \
              WITH g WHERE g.last_sequence IS NULL OR g.last_sequence < $seq \
              SET g.last_sequence = $seq, g.last_event_id = $event_id, g.deleted = $deleted, g.permanent = $permanent \
              WITH g \

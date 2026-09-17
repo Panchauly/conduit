@@ -390,6 +390,73 @@ fn neo4j_concurrent_writers() -> R {
     Ok(())
 }
 
+/// Regression test for a real lost-update bug: `cas_write`'s original Cypher
+/// read `g.last_sequence` in a `WHERE` clause with no write lock held on the
+/// guard node, so two concurrent transactions could both pass the check
+/// against the same stale value and whichever committed last in real time
+/// won, independent of sequence order. Two racing writers (the test above)
+/// rarely hit that window; twenty reliably did — a 20-writer stress run
+/// reproduced the lost update in roughly 7 of 10 runs before the fix (a
+/// forced write-lock acquisition on the guard node before the CAS
+/// comparison, added to `cas_write`) and 0 of 30 after.
+#[test]
+fn neo4j_20_concurrent_writers_converge_to_highest_sequence() -> R {
+    require_neo4j!(uri);
+    let label = fresh_label();
+
+    let mapping_yaml = format!(
+        "kind: node\nevent: C\nlabel: {label}\nversion: 1\nkey: payload.id\non_existing: replace\nproperties:\n  state: payload.state\n"
+    );
+    let mut m = HashMap::new();
+    m.insert("C".into(), graph_mapping(&mapping_yaml));
+    let a = Arc::new(neo4j_adapter(&uri, m));
+
+    a.handle(&ev(
+        "C",
+        1,
+        serde_json::json!({ "id": "n1", "state": "seed" }),
+    ));
+
+    let handles: Vec<_> = (2u64..=21u64)
+        .map(|seq| {
+            let a = Arc::clone(&a);
+            std::thread::spawn(move || {
+                a.handle(&ev(
+                    "C",
+                    seq,
+                    serde_json::json!({ "id": "n1", "state": format!("s{seq}") }),
+                ))
+                .outcome
+            })
+        })
+        .collect();
+
+    for h in handles {
+        let outcome = h.join().expect("writer thread must not panic");
+        assert!(
+            !matches!(outcome, AdapterOutcome::Failed(_)),
+            "no writer may fail under bounded CAS retry: {outcome:?}"
+        );
+    }
+
+    let rt = verify_rt();
+    let graph = connect(&rt, &uri)?;
+    let row = query_one_row(
+        &rt,
+        &graph,
+        neo4rs::Query::new(format!(
+            "MATCH (n:`{label}` {{id: 'n1'}}) RETURN n.state AS state"
+        )),
+    )
+    .expect("node must exist");
+    assert_eq!(
+        row.get::<String>("state")?,
+        "s21",
+        "the highest sequence's write must be the one that lands, never a lower one"
+    );
+    Ok(())
+}
+
 /// The same event stream, projected into the file adapter and Neo4j, must
 /// converge to identical logical nodes.
 #[test]
