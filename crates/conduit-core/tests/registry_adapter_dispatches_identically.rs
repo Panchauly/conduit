@@ -20,13 +20,12 @@ use conduit_core::adapter::document::mapping::DocumentMapping;
 use conduit_core::adapter::{AdapterResult, StorageAdapter};
 use conduit_core::event::Event;
 use conduit_core::execution::{AdapterOutcome, ExecutionStatus};
-use conduit_core::register_adapter_factory;
 use conduit_core::routing::{AdapterId, StorageKind, load_routing};
 use conduit_core::runtime::build_adapters_from_config;
 use conduit_core::runtime::config::{
     AdapterConfig, ConduitConfig, CustomAdapterConfig, FileAdapterConfig, FileConfig, RoutingConfig,
 };
-use conduit_core::runtime::{AdapterExecutionMeta, adapter_metadata_map};
+use conduit_core::runtime::{AdapterExecutionMeta, AdapterRegistry, adapter_metadata_map};
 
 fn test_routing() -> HashMap<String, Vec<AdapterId>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -89,7 +88,8 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
     let type_name = "test-mock-sql-25-5";
     let invoked = Arc::new(AtomicBool::new(false));
     let invoked_in_factory = Arc::clone(&invoked);
-    register_adapter_factory(type_name, move |raw| {
+    let mut registry = AdapterRegistry::new();
+    registry.register(type_name, move |raw| {
         invoked_in_factory.store(true, Ordering::SeqCst);
         // The registry hands the factory the *entire* raw adapter entry
         // (id/priority/type/config/...), not just a `config:` sub-block —
@@ -154,6 +154,7 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
         HashMap::new(),
         HashMap::new(),
         Arc::new(conduit_core::UpcasterRegistry::new()),
+        &registry,
     );
 
     assert!(
@@ -212,6 +213,7 @@ fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
         HashMap::new(),
         HashMap::new(),
         Arc::new(conduit_core::UpcasterRegistry::new()),
+        &AdapterRegistry::new(),
     );
     assert_eq!(
         adapters.len(),

@@ -330,11 +330,36 @@ impl ReplayContext {
                 kv_mappings,
                 graph_mappings,
                 upcasters,
+                &crate::runtime::AdapterRegistry::new(),
             ),
             failure_policy: config.failure_policy,
             routing_rules,
             adapter_meta: adapter_metadata_map(config),
         }
+    }
+
+    /// Wrap an already-built adapter set (Phase 27's
+    /// [`crate::runtime::engine::ConduitRuntime`]) instead of building a
+    /// fresh one — avoids rebuilding/reconnecting adapters the caller already
+    /// owns.
+    pub(crate) fn from_parts(
+        adapters: Vec<Box<dyn crate::adapter::StorageAdapter>>,
+        failure_policy: FailurePolicy,
+        routing_rules: HashMap<String, Vec<AdapterId>>,
+        adapter_meta: HashMap<AdapterId, AdapterExecutionMeta>,
+    ) -> Self {
+        Self {
+            adapters,
+            failure_policy,
+            routing_rules,
+            adapter_meta,
+        }
+    }
+
+    /// Take back the adapters this context owns, so a caller that lent them
+    /// in via [`ReplayContext::from_parts`] can keep using the same built set.
+    pub(crate) fn into_adapters(self) -> Vec<Box<dyn crate::adapter::StorageAdapter>> {
+        self.adapters
     }
 
     /// Process events with default options (full `per_event` list).

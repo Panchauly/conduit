@@ -25,7 +25,7 @@ use crate::routing::StorageKind;
 use crate::upcast::UpcasterRegistry;
 
 use crate::runtime::config::{AdapterConfig, ConduitConfig, ConfigError};
-use crate::runtime::registry;
+use crate::runtime::registry::AdapterRegistry;
 
 /// Phase 25.2: pushed in place of a real adapter when an `AdapterConfig::Custom`'s
 /// `type:` has no factory registered (or the registered factory itself
@@ -69,11 +69,16 @@ impl StorageAdapter for FailedAdapter {
 /// governs how each adapter reacts when no upcaster chain exists to its mapping's target version.
 ///
 /// **Phase 25.2:** `AdapterConfig::Custom` (an unrecognized `type:`) is
-/// resolved against the [`registry`] here, at build time — not at parse time,
-/// so a factory registered after config parsing but before this call still
+/// resolved against `registry` here, at build time — not at parse time, so a
+/// factory registered after config parsing but before this call still
 /// resolves. An unregistered type, or a factory that itself returns `Err`,
 /// becomes a [`FailedAdapter`] placeholder rather than making this function
 /// fallible: every other adapter in the config still builds and runs.
+///
+/// **Phase 27:** `registry` is caller-owned (e.g.
+/// [`crate::runtime::engine::ConduitRuntime`]) rather than a process-wide
+/// global — pass [`AdapterRegistry::new`] for a call site with no custom
+/// adapter types.
 #[allow(clippy::too_many_arguments)]
 pub fn build_adapters_from_config(
     config: &ConduitConfig,
@@ -82,6 +87,7 @@ pub fn build_adapters_from_config(
     kv_mappings: HashMap<String, KvMapping>,
     graph_mappings: HashMap<String, GraphMapping>,
     upcasters: Arc<UpcasterRegistry>,
+    registry: &AdapterRegistry,
 ) -> Vec<Box<dyn StorageAdapter>> {
     let mut adapters: Vec<Box<dyn StorageAdapter>> = Vec::new();
 
@@ -211,7 +217,7 @@ pub fn build_adapters_from_config(
 
             AdapterConfig::Custom(cfg) => {
                 let adapter: Box<dyn StorageAdapter> =
-                    match registry::build(&cfg.type_name, cfg.raw.clone()) {
+                    match registry.build(&cfg.type_name, cfg.raw.clone()) {
                         Some(Ok(a)) => a,
                         Some(Err(e)) => Box::new(FailedAdapter {
                             id: cfg.id.clone(),

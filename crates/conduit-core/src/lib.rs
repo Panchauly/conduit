@@ -61,10 +61,11 @@ pub use runtime::{
     validate_routing_for_event_type,
 };
 
-/// Phase 25.2: register a factory for a custom (non-built-in) `AdapterConfig`
-/// `type:`, so a community connector crate plugs into `type: <name>` in the
-/// YAML config exactly like a built-in adapter.
-pub use runtime::register_adapter_factory;
+/// Phase 27: the facade type — owns config, mappings, routing, an
+/// instance-scoped [`AdapterRegistry`], and (once built) the resolved
+/// adapters, exposing `run_once`/`dry_run_once`/`replay`/`run_sources` as
+/// methods instead of free functions that each re-thread the same bundle.
+pub use runtime::{AdapterRegistry, ConduitRuntime};
 
 /// Execution report types (also at [crate root](crate) for convenience).
 pub mod report {
@@ -119,6 +120,10 @@ pub fn execute_event(
 
 /// Same as [execute_event], with an explicit [UpcasterRegistry] (Phase 10.3) for
 /// projecting version-mismatched event payloads before mapping.
+///
+/// Builds adapters with an empty [`runtime::AdapterRegistry`] — an
+/// `AdapterConfig::Custom` type is not resolvable through this low-level
+/// entry point. Use [`ConduitRuntime`] to register custom adapter factories.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_event_with_upcasters(
     config: &ConduitConfig,
@@ -137,6 +142,7 @@ pub fn execute_event_with_upcasters(
         kv_mappings,
         graph_mappings,
         upcasters,
+        &runtime::AdapterRegistry::new(),
     );
     let adapter_meta = crate::runtime::adapter_metadata_map(config);
     dispatch(
@@ -180,6 +186,7 @@ pub fn execute_event_with_mode(
                 kv_mappings,
                 graph_mappings,
                 Arc::new(UpcasterRegistry::new()),
+                &runtime::AdapterRegistry::new(),
             );
             let adapter_meta = crate::runtime::adapter_metadata_map(config);
             dispatch(

@@ -209,6 +209,7 @@ pub fn run_sources(
         kv_mappings,
         graph_mappings,
         Arc::new(UpcasterRegistry::new()),
+        &crate::runtime::AdapterRegistry::new(),
     );
     run_sources_with_adapters(config, routing_rules, adapters, sources, opts, stop)
 }
